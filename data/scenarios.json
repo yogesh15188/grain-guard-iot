@@ -1,0 +1,55 @@
+{
+  "scenarios": [
+    {
+      "id": "normal",
+      "label": "Normal",
+      "expect": "S0_IDLE_SAFE / LOW",
+      "telemetry": {
+        "temp": 26.0, "rh": 58.0, "fork_raw": 880,
+        "ldr_raw": 24, "distance_cm": 15.0
+      }
+    },
+    {
+      "id": "humidity_intrusion",
+      "label": "Humidity Intrusion",
+      "expect": "S1_ATMOSPHERIC_INGRESS / HIGH / aeration locked",
+      "telemetry": {
+        "temp": 27.8, "rh": 86.4, "fork_raw": 1023,
+        "ldr_raw": 840, "distance_cm": 15.0
+      }
+    },
+    {
+      "id": "dunnage_seepage",
+      "label": "Dunnage Seepage",
+      "expect": "S2_DUNNAGE_SEEPAGE / HIGH / aeration locked",
+      "telemetry": {
+        "temp": 26.5, "rh": 61.2, "fork_raw": 190,
+        "ldr_raw": 32, "distance_cm": 15.2
+      }
+    },
+    {
+      "id": "stock_anomaly",
+      "label": "Stock Anomaly",
+      "expect": "S4_PHYSICAL_ANOMALY / MEDIUM-HIGH",
+      "telemetry": {
+        "temp": 28.2, "rh": 63.5, "fork_raw": 1023,
+        "ldr_raw": 28, "distance_cm": 23.8
+      }
+    },
+    {
+      "id": "offline",
+      "label": "Offline",
+      "expect": "S6_OFFLINE",
+      "telemetry": null
+    },
+    {
+      "id": "unverified_ack",
+      "label": "Unverified Acknowledgment",
+      "expect": "S7_AUDIT_ANOMALY",
+      "telemetry": {
+        "temp": 28.5, "rh": 78.0, "fork_raw": 1023,
+        "ldr_raw": 12, "distance_cm": 15.0
+      }
+    }
+  ]
+}

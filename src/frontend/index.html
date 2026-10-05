@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrainGuard — Protect the Grain. See the Risk Before the Loss.</title>
+<meta name="description" content="Offline-first early warning for Indian grain storage.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127807;</text></svg>">
+</head>
+<body>
+
+<!-- ================= NAVBAR ================= -->
+<header class="nav">
+  <a class="brand" href="#overview">
+    <svg class="logo" viewBox="0 0 44 44" aria-hidden="true">
+      <path d="M22 4 L38 11 V24 C38 33 31 39 22 41 C13 39 6 33 6 24 V11 Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+      <ellipse cx="22" cy="17" rx="4.2" ry="5.6" fill="currentColor" transform="rotate(-18 22 17)"/>
+      <ellipse cx="16" cy="24" rx="4.2" ry="5.6" fill="currentColor" transform="rotate(-20 16 24)"/>
+      <ellipse cx="28" cy="24" rx="4.2" ry="5.6" fill="currentColor" transform="rotate(20 28 24)"/>
+    </svg>
+    <span>Grain<strong>Guard</strong></span>
+  </a>
+  <nav class="navlinks">
+    <a href="#overview">Overview</a>
+    <a href="#monitoring">Monitoring</a>
+    <a href="#how">How It Works</a>
+    <a href="#technology">Technology</a>
+    <a class="btn btn-primary btn-sm" href="#console">Launch Console</a>
+  </nav>
+  <div class="navright">
+    <span class="clock" id="clock">--:--:--</span>
+    <button class="themebtn" id="themeBtn" aria-label="Toggle theme">
+      <span class="sun">&#9728;&#65039;</span><span class="moon">&#127769;</span>
+    </button>
+  </div>
+</header>
+
+<!-- ================= HERO ================= -->
+<section class="hero" id="overview">
+  <div class="hero-inner">
+    <span class="pill">EDGE MONITORING &bull; OFFLINE READY</span>
+    <h1>Protect the Grain.<br>See the Risk Before the Loss.</h1>
+    <p class="sub">Offline-first early warning for Indian grain storage.</p>
+    <p class="lead">
+      Low-cost sensors watch one bin. Physics turns the readings into evidence.
+      Fixed rules decide the risk. A human does the rest.
+    </p>
+    <div class="ctas">
+      <a class="btn btn-primary btn-lg" href="#console">Launch Monitoring Console</a>
+      <a class="btn btn-ghost btn-lg" href="#how">See How It Works</a>
+    </div>
+  </div>
+</section>
+
+<!-- ================= VALUE ================= -->
+<section class="values" id="technology">
+  <article class="value">
+    <span class="vnum">01</span>
+    <h3>Detect</h3>
+    <p>Environmental and physical changes around the bin: temperature, humidity, light at the shutter, and grain surface level.</p>
+  </article>
+  <article class="value">
+    <span class="vnum">02</span>
+    <h3>Reason</h3>
+    <p>Deterministic, evidence-based risk. Fixed thresholds, no guessing, and every decision shows the exact rule that fired.</p>
+  </article>
+  <article class="value">
+    <span class="vnum">03</span>
+    <h3>Act</h3>
+    <p>Human-verified next steps. GrainGuard tells the operator what to physically check and locks aeration when it is unsafe.</p>
+  </article>
+</section>
+<!-- ================= WORKFLOW ================= -->
+<section class="how" id="how">
+  <h2 class="sec-title">How it works</h2>
+  <p class="sec-sub">The same path runs whether the readings come from a real sensor or a demo scenario.</p>
+  <div class="flow">
+    <div class="fstep"><span class="ficon">&#128225;</span><b>Sensors</b><small>DHT11, Fork, LDR, HC-SR04</small></div>
+    <div class="farrow">&rarr;</div>
+    <div class="fstep"><span class="ficon">&#9520;</span><b>Physics</b><small>EMC estimate, dew point, &Delta;h</small></div>
+    <div class="farrow">&rarr;</div>
+    <div class="fstep"><span class="ficon">&#9881;</span><b>Risk Engine</b><small>Ordered fixed rules</small></div>
+    <div class="farrow">&rarr;</div>
+    <div class="fstep"><span class="ficon">&#128100;</span><b>Human Check</b><small>Verify on site</small></div>
+    <div class="farrow">&rarr;</div>
+    <div class="fstep"><span class="ficon">&#9989;</span><b>Action</b><small>Aeration or repair</small></div>
+  </div>
+  <p class="note">
+    A language model can reword the result in plain English. It never decides risk, state or actuator permission.
+  </p>
+</section>
+
+<!-- ================= CONSOLE ================= -->
+<main class="console" id="console">
+  <div class="conbar">
+    <div class="cbrand">
+      <svg class="logo sm" viewBox="0 0 44 44" aria-hidden="true">
+        <path d="M22 4 L38 11 V24 C38 33 31 39 22 41 C13 39 6 33 6 24 V11 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+        <ellipse cx="22" cy="17" rx="4" ry="5.2" fill="currentColor"/>
+        <ellipse cx="16.5" cy="24" rx="4" ry="5.2" fill="currentColor"/>
+        <ellipse cx="27.5" cy="24" rx="4" ry="5.2" fill="currentColor"/>
+      </svg>
+      <span>GrainGuard</span>
+    </div>
+    <div class="cbarinfo">
+      <span class="muted">Facility:</span> <b id="facilityName">Demo Rice Storage</b>
+      <span class="sep">|</span>
+      <span id="clock2">--</span>
+    </div>
+    <div class="cbarmode">
+      <span class="hwflag" id="hwFlag">checking hardware&hellip;</span>
+      <span class="modepill" id="modePill">CONNECTING</span>
+      <button class="themebtn" id="themeBtn2" aria-label="Toggle theme">
+        <span class="sun">&#9728;&#65039;</span><span class="moon">&#127769;</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="modetabs">
+    <button class="mtab active" data-view="operator">Operator Mode</button>
+    <button class="mtab" data-view="manager">Manager Mode</button>
+  </div>
+
+  <!-- HERO STATUS -->
+  <section class="status-hero" id="statusHero">
+    <div class="sh-left">
+      <span class="sh-label">STORAGE STATUS</span>
+      <h2 class="sh-state" id="shState">WAITING</h2>
+      <p class="sh-sub" id="shSub">Reading the edge node&hellip;</p>
+      <code class="sh-statecode" id="shCode"></code>
+    </div>
+    <div class="sh-right">
+      <div class="riskbox">
+        <span class="rb-label">RISK</span>
+        <span class="rb-value" id="riskValue">&mdash;</span>
+      </div>
+      <div class="aerbox" id="aerBox">
+        <span class="ab-label">AERATION</span>
+        <span class="ab-value" id="aerValue">LOCKED</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- METRICS -->
+  <section class="metrics" id="monitoring">
+    <div class="card metric" id="mTemp"><span class="m-label">Temperature</span><span class="m-val" id="vTemp">&mdash;</span><span class="m-unit">&deg;C</span></div>
+    <div class="card metric" id="mRh"><span class="m-label">Relative Humidity</span><span class="m-val" id="vRh">&mdash;</span><span class="m-unit">%</span></div>
+    <div class="card metric" id="mEmc"><span class="m-label">EMC Estimate</span><span class="m-val" id="vEmc">&mdash;</span><span class="m-unit">%</span><span class="m-foot">air estimate, not grain moisture</span></div>
+    <div class="card metric" id="mDh"><span class="m-label">Headspace Change</span><span class="m-val" id="vDh">&mdash;</span><span class="m-unit">cm</span><span class="m-foot" id="fDh">baseline &mdash;</span></div>
+  </section>
+<div class="grid2">
+    <div class="col">
+      <section class="card panel">
+        <h3 class="ph">WHY?</h3>
+        <p class="rule" id="ruleText">&mdash;</p>
+        <h4 class="ph sm">Triggered evidence</h4>
+        <ul class="evi" id="eviList"></ul>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">WHAT SHOULD BE CHECKED?</h3>
+        <ol class="checks" id="checkList"></ol>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">Operator Explanation <span class="tag">wording only</span></h3>
+        <p class="explain" id="explainText">&mdash;</p>
+        <span class="srcnote" id="explainSrc"></span>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="card panel">
+        <h3 class="ph">Bin Mimic <span class="tag">live zones</span></h3>
+        <svg class="mimic" viewBox="0 0 320 210" aria-label="Bin schematic">
+          <defs>
+            <linearGradient id="grainG" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#e8c46a"/><stop offset="100%" stop-color="#c99b3c"/>
+            </linearGradient>
+          </defs>
+          <rect class="m-body" x="40" y="20" width="240" height="150" rx="6"/>
+          <rect class="m-air" id="mAir" x="46" y="26" width="228" height="94"/>
+          <path id="mGrain" class="m-grain" d="M46 120 H274 V164 H46 Z" fill="url(#grainG)"/>
+          <line class="m-probe" id="mProbe" x1="240" y1="52" x2="240" y2="104"/>
+          <rect class="m-dht" id="mDht" cx="74" y="34" width="16" height="16" rx="3"/>
+          <rect class="m-shutter" id="mShutter" x="150" y="10" width="60" height="14" rx="3"/>
+          <rect class="m-ldr" id="mLdr" x="120" y="30" width="13" height="11" rx="2"/>
+          <text class="m-txt" x="240" y="200" text-anchor="middle">Fork / surface</text>
+          <text class="m-txt" x="180" y="48" text-anchor="middle">Shutter</text>
+          <text class="m-txt" x="96" y="46" text-anchor="middle">DHT11</text>
+        </svg>
+        <div class="mlegend">
+          <span><i class="dot safe"></i>Safe</span><span><i class="dot watch"></i>Watch</span>
+          <span><i class="dot alert"></i>Alert</span><span><i class="dot crit"></i>Critical</span>
+        </div>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">Recent Events</h3>
+        <ul class="timeline" id="eventsList"></ul>
+        <div class="ackrow">
+          <input id="ackNote" type="text" placeholder="What did you physically check?">
+          <button class="btn btn-ghost btn-sm" id="ackVerified">Ack &mdash; verified</button>
+          <button class="btn btn-warn btn-sm" id="ackUnverified">Ack &mdash; not verified</button>
+        </div>
+      </section>
+
+      <section class="card panel manager-only" id="managerPanel">
+        <h3 class="ph">Manager Detail <span class="tag">audit</span></h3>
+        <table class="raw">
+          <tr><th>Temperature</th><td id="rTemp">&mdash;</td><th>EMC estimate</th><td id="rEmc">&mdash;</td></tr>
+          <tr><th>Relative humidity</th><td id="rRh">&mdash;</td><th>Dew point</th><td id="rDew">&mdash;</td></tr>
+          <tr><th>Fork raw</th><td id="rFork">&mdash;</td><th>LDR raw</th><td id="rLdr">&mdash;</td></tr>
+          <tr><th>Distance</th><td id="rDist">&mdash;</td><th>&Delta;h</th><td id="rDh">&mdash;</td></tr>
+          <tr><th>Moisture stress h</th><td id="rMs">&mdash;</td><th>Thermal stress h</th><td id="rTs">&mdash;</td></tr>
+        </table>
+        <div class="rstate">
+          <div><span class="muted">State</span><b id="rState">&mdash;</b></div>
+          <div><span class="muted">Rule</span><code id="rRule">&mdash;</code></div>
+          <div><span class="muted">Timestamp</span><b id="rTime">&mdash;</b></div>
+          <div><span class="muted">Ledger chain</span><b id="rChain">&mdash;</b></div>
+        </div>
+        <p class="srcnote" id="ackState"></p>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">Simulation <span class="tag">judge demo</span></h3>
+        <div class="simbtns" id="simBtns"></div>
+        <div class="pipeline" id="pipeline">
+          <span class="pstep" data-step="1">Telemetry</span>
+          <span class="parrow">&darr;</span>
+          <span class="pstep" data-step="2">Physics</span>
+          <span class="parrow">&darr;</span>
+          <span class="pstep" data-step="3">Deterministic Engine</span>
+          <span class="parrow">&darr;</span>
+          <span class="pstep" data-step="4">SLM Explanation</span>
+        </div>
+        <p class="srcnote" id="simNote">Simulated readings pass through the same physics and engine path as live telemetry.</p>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="fcol">
+    <span class="brand small">
+      <svg class="logo xs" viewBox="0 0 44 44" aria-hidden="true">
+        <path d="M22 4 L38 11 V24 C38 33 31 39 22 41 C13 39 6 33 6 24 V11 Z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/>
+        <ellipse cx="22" cy="20" rx="4" ry="5" fill="currentColor"/>
+        <ellipse cx="16.5" cy="26" rx="4" ry="5" fill="currentColor"/>
+        <ellipse cx="27.5" cy="26" rx="4" ry="5" fill="currentColor"/>
+      </svg>
+      Grain<strong>Guard</strong>
+    </span>
+    <p>Offline-first early warning for Indian grain storage.</p>
+  </div>
+  <div class="fcol"><h4>Product</h4>
+    <a href="#overview">Overview</a><a href="#monitoring">Monitoring</a>
+    <a href="#how">How It Works</a><a href="#console">Launch Console</a>
+  </div>
+  <div class="fcol"><h4>Technology</h4>
+    <a href="#technology">Detect &rarr; Reason &rarr; Act</a><a href="#how">Physics layer</a>
+    <a href="#console">Simulation modes</a>
+  </div>
+  <div class="fcol"><h4>Honest limits</h4>
+    <p>Sensors do not detect pests, fungus, rodents or groundwater. EMC is an air estimate, not measured grain moisture.</p>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

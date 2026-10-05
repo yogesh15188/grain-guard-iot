@@ -1,0 +1,24 @@
+{
+  "facility": "Demo Rice Storage",
+  "location": "Tamil Nadu, India",
+  "commodity": "Rough rice (paddy)",
+  "bin": "Bay 2 - concrete godown",
+  "baseline_distance_cm": 15.0,
+  "rules": {
+    "fork_low": 300,
+    "fork_loaded": 600,
+    "ldr_anomaly": 700,
+    "delta_height_cm": 5.0,
+    "rh_limit": 65.0,
+    "emc_ingress": 14.0,
+    "emc_aeration": 13.5,
+    "temp_limit": 28.0,
+    "moisture_stress_limit_h": 24.0
+  },
+  "known_defects": [
+    "Roof gap above the north shutter, seen after heavy rain",
+    "Ground drainage slopes toward the bin wall on the west side",
+    "Door latch on the south shutter does not hold overnight"
+  ],
+  "notes": "EMC is an ESTIMATE of the moisture the air would reach. It is NOT a measurement of grain moisture content. Sensors cannot detect pests, fungus, rodents or groundwater."
+}

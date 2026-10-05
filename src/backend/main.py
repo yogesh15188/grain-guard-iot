@@ -1,0 +1,310 @@
+"""GrainGuard FastAPI server.
+
+ONE pipeline for everything. Live serial packets, POSTed telemetry and
+simulated scenario packets all enter through process_telemetry(), so the demo
+provably uses the same physics + engine path as live data.
+
+SLM runs last, on wording only.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import threading
+import time
+from datetime import datetime
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import engine                      # noqa: E402
+import slm_forensics               # noqa: E402
+from database import Database, _now_iso   # noqa: E402
+from serial_worker import SerialWorker      # noqa: E402
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA = os.path.join(ROOT, "data")
+FRONTEND = os.path.join(ROOT, "src", "frontend")
+
+app = FastAPI(title="GrainGuard", version="1.0")
+db = Database()
+lock = threading.Lock()
+
+STATE = {
+    "mode": "LIVE",            # LIVE | SIMULATION | OFFLINE
+    "source_detail": "starting",
+    "last_packet": None,
+    "last_result": None,
+    "last_ts": None,
+    "last_event_id": None,
+    "baseline_cm": 15.0,
+    "limits": {},
+    "offline_mode": False,
+    "unverified_ack": None,
+    "facility": {},
+    "sim_hold_until": 0.0,
+}
+
+
+def _load_json(name, default):
+    try:
+        with open(os.path.join(DATA, name), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+PROFILE = _load_json("facility_profile.json", {})
+SCENARIOS = {s["id"]: s for s in _load_json("scenarios.json", {"scenarios": []}).get("scenarios", [])}
+STATE["baseline_cm"] = float(PROFILE.get("baseline_distance_cm", 15.0))
+STATE["limits"] = PROFILE.get("rules", {})
+STATE["facility"] = {
+    "name": PROFILE.get("facility", "Demo Rice Storage"),
+    "commodity": PROFILE.get("commodity", ""),
+    "bin": PROFILE.get("bin", ""),
+    "known_defects": PROFILE.get("known_defects", []),
+}
+
+
+SIM_HOLD_SECONDS = 60.0   # keep a triggered scenario on screen long enough to read
+
+
+def process_telemetry(packet: dict, source: str, hold: bool = False) -> dict:
+    """THE single entry point into physics + engine + ledger."""
+    with lock:
+        if hold:
+            STATE["sim_hold_until"] = time.time() + SIM_HOLD_SECONDS
+        elif source in ("MOCK", "LIVE") and time.time() < STATE.get("sim_hold_until", 0):
+            # A scenario is on screen. Mock/live noise must not erase it.
+            return dict(STATE["last_result"] or {})
+        STATE["last_packet"] = packet
+        STATE["last_ts"] = time.time()
+        STATE["offline_mode"] = False
+        STATE["source_detail"] = source
+        if source != "SIMULATION":
+            STATE["mode"] = "LIVE"
+
+        result = engine.evaluate(packet, STATE["baseline_cm"], STATE["limits"])
+        previous = STATE["last_result"]
+        STATE["last_result"] = result
+        db.log_telemetry(packet, result, source)
+
+        if previous is None or previous.get("state") != result["state"] \
+                or previous.get("risk") != result["risk"]:
+            event_id = db.log_event("STATE_CHANGE", result, {
+                "source": source,
+                "evidence": result["evidence"],
+                "aeration": result["aeration"],
+            })
+            STATE["last_event_id"] = event_id
+    result = dict(result)
+    result["mode"] = STATE["mode"] if source != "SIMULATION" else "SIMULATION"
+    result["source"] = source
+    result["timestamp"] = packet.get("timestamp") or _now_iso()
+    result["event_id"] = STATE["last_event_id"]
+    result["explanation"] = slm_forensics.explain(result)
+    return result
+
+
+def apply_offline(seconds: float = 0):
+    with lock:
+        STATE["offline_mode"] = True
+        STATE["mode"] = "OFFLINE"
+        STATE["sim_hold_until"] = time.time() + SIM_HOLD_SECONDS
+        base = STATE["last_result"] or engine.evaluate({}, None, STATE["limits"])
+        result = engine.evaluate_offline(base, seconds)
+        STATE["last_result"] = result
+        STATE["last_event_id"] = db.log_event("TELEMETRY_LOST", result,
+                                              {"seconds": round(seconds, 1)})
+    result = dict(result)
+    result["mode"] = "OFFLINE"
+    result["source"] = "SIMULATION"
+    result["timestamp"] = _now_iso()
+    result["event_id"] = STATE["last_event_id"]
+    result["explanation"] = slm_forensics.explain(result)
+    return result
+
+
+def apply_unverified_ack(ack: dict):
+    with lock:
+        base = STATE["last_result"] or {}
+        STATE["unverified_ack"] = ack
+        STATE["sim_hold_until"] = time.time() + SIM_HOLD_SECONDS
+        result = engine.evaluate_audit_anomaly(base, ack)
+        STATE["last_result"] = result
+        STATE["last_event_id"] = db.log_event("AUDIT_ANOMALY", result, {
+            "acknowledgment": ack,
+            "note": "unverified acknowledgment - original alert preserved",
+        })
+    result = dict(result)
+    result["mode"] = STATE["mode"]
+    result["source"] = "SIMULATION"
+    result["timestamp"] = _now_iso()
+    result["event_id"] = STATE["last_event_id"]
+    result["explanation"] = slm_forensics.explain(result)
+    return result
+class TelemetryIn(BaseModel):
+    timestamp: str | None = None
+    temp: float | None = None
+    rh: float | None = None
+    fork_raw: float | None = None
+    ldr_raw: float | None = None
+    distance_cm: float | None = None
+
+
+class AckIn(BaseModel):
+    operator: str = "operator"
+    event_id: int | None = None
+    physically_verified: bool = False
+    note: str = ""
+
+
+def _worker_detail():
+    """Live hardware status, read fresh so the banner reflects reality."""
+    w = STATE.get("_worker")
+    if w is None:
+        return "serial worker not started"
+    return w.detail or w.mode
+
+
+@app.get("/api/status")
+def get_status():
+    with lock:
+        result = dict(STATE["last_result"] or {})
+        result["mode"] = STATE["mode"]
+        result["source_detail"] = _worker_detail()
+        result["facility"] = STATE["facility"]
+        result["baseline_cm"] = STATE["baseline_cm"]
+        result["limits"] = STATE["limits"]
+        result["unverified_ack"] = STATE["unverified_ack"]
+        last_ts = STATE["last_ts"]
+    age = (time.time() - last_ts) if last_ts else None
+    if result:
+        result["seconds_since_last"] = round(age, 1) if age is not None else None
+    return {
+        "facility": STATE["facility"],
+        "mode": STATE["mode"],
+        "source_detail": _worker_detail(),
+        "limits": STATE["limits"],
+        "baseline_cm": STATE["baseline_cm"],
+        "result": result,
+        "scenarios": [{"id": k, "label": v.get("label", k), "expect": v.get("expect", "")}
+                      for k, v in SCENARIOS.items()],
+        "chain": db.verify_chain(),
+        "slm_enabled": slm_forensics.SLM_ENABLED,
+        "sim_hold_seconds": max(0.0, round(STATE["sim_hold_until"] - time.time(), 1)),
+        "server_time": _now_iso(),
+    }
+
+
+@app.post("/api/telemetry")
+def post_telemetry(body: TelemetryIn):
+    packet = body.model_dump(exclude_none=True)
+    if not packet:
+        raise HTTPException(400, "empty telemetry payload")
+    return process_telemetry(packet, "LIVE")
+
+
+@app.get("/api/history")
+def get_history(limit: int = 60):
+    return {"history": db.history(min(limit, 500))}
+
+
+@app.get("/api/events")
+def get_events(limit: int = 60):
+    return {"events": db.events(min(limit, 200)),
+            "acknowledgments": db.acknowledgments(20),
+            "chain": db.verify_chain()}
+
+
+@app.post("/api/simulate/{scenario_id}")
+def simulate(scenario_id: str):
+    scenario = SCENARIOS.get(scenario_id)
+    if not scenario:
+        raise HTTPException(404, f"unknown scenario '{scenario_id}'")
+
+    if scenario_id == "offline":
+        age = 0.0
+        if STATE["last_ts"]:
+            age = time.time() - STATE["last_ts"]
+        return apply_offline(age)
+
+    packet = dict(scenario.get("telemetry") or {})
+    packet.setdefault("timestamp", _now_iso())
+    result = process_telemetry(packet, "SIMULATION", hold=True)
+
+    if scenario_id == "unverified_ack":
+        ack = db.log_ack("operator-on-duty", STATE["last_event_id"], 0,
+                         "Alert marked handled without physical verification.")
+        return apply_unverified_ack(ack)
+
+    return result
+
+
+@app.post("/api/acknowledge")
+def acknowledge(body: AckIn):
+    ack = db.log_ack(body.operator, body.event_id or STATE["last_event_id"],
+                     1 if body.physically_verified else 0, body.note)
+    if not body.physically_verified:
+        return apply_unverified_ack(ack)
+    with lock:
+        STATE["unverified_ack"] = None
+        STATE["sim_hold_until"] = time.time() + SIM_HOLD_SECONDS
+        # A verification clears the audit overlay, so re-run the real sensor
+        # state rather than keeping the S7 result on top of it.
+        base = engine.evaluate(STATE["last_packet"], STATE["baseline_cm"], STATE["limits"]) \
+            if STATE["last_packet"] else dict(STATE["last_result"] or {})
+        STATE["last_result"] = base
+        STATE["last_event_id"] = db.log_event(
+            "ACKNOWLEDGMENT_VERIFIED", base, {"acknowledgment": ack})
+    out = dict(STATE["last_result"] or {})
+    out.update({"mode": STATE["mode"], "source": "LIVE", "timestamp": _now_iso(),
+                "event_id": STATE["last_event_id"], "acknowledgment": ack,
+                "explanation": slm_forensics.explain(out)})
+    return out
+
+
+# --- static frontend ------------------------------------------------------
+@app.get("/api/health")
+def health():
+    return {"ok": True, "time": _now_iso()}
+
+
+@app.get("/")
+def index():
+    return FileResponse(os.path.join(FRONTEND, "index.html"))
+
+
+@app.on_event("startup")
+def startup():
+    engine.STRESS.reset()
+    seed = _load_json("sensor_reading.json", {})
+    if seed:
+        process_telemetry(seed, "LIVE")
+
+    def on_packet(packet, mode):
+        try:
+            process_telemetry(packet, mode)
+        except Exception:                      # noqa: BLE001 - never crash the app
+            pass
+
+    mock = {"temp": 27.2, "rh": 61.0, "fork_raw": 890, "ldr_raw": 22, "distance_cm": 15.0}
+    worker = SerialWorker(on_packet, mock_packet=mock)
+    worker.start()
+    STATE["source_detail"] = worker.detail
+    STATE["_worker"] = worker
+
+
+@app.exception_handler(Exception)
+def unhandled(request, exc):
+    """Last-resort guard: the dashboard must always get a JSON answer."""
+    return JSONResponse(status_code=500,
+                        content={"error": "internal", "detail": str(exc)[:200]})
+
+
+app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")

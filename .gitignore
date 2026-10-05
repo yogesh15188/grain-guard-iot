@@ -1,0 +1,19 @@
+# --- local runtime data (ledger is operational data, not source) ---
+data/storage.db
+data/storage.db-shm
+data/storage.db-wal
+*.log
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# --- editors / OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
