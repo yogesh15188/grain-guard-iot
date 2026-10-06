@@ -1,0 +1,87 @@
+/* GrainGuard 3D viewer — reuses styles.css tokens verbatim.
+   High-contrast industrial theme. No glassmorphism, no backdrop-filter,
+   no web fonts. Solid surfaces, 1.5px borders, --shadow. */
+
+/* Surface recipe. styles.css has no .card rule (it is used in markup but never
+   defined there), so this page supplies the same recipe the .value/.fstep cards use. */
+.card{background:var(--surface);border:1.5px solid var(--line);border-radius:11px;box-shadow:var(--shadow)}
+
+.navlinks a[aria-current="page"]{background:var(--brand-soft);color:var(--brand2);font-weight:700}
+[data-theme="dark"] .navlinks a[aria-current="page"]{color:var(--brand)}
+
+.v3{padding-bottom:40px}
+.v3-hero{margin-bottom:16px;padding:20px 24px;border-radius:11px;border-top:1.5px solid var(--line)}
+.v3-hero .sh-state{margin-top:2px}
+.v3-hero .tag{margin-left:0}
+
+/* ---------- layout ---------- */
+.v3-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(330px,1fr);gap:16px;align-items:start}
+.v3-left{display:flex;flex-direction:column;gap:16px;min-width:0}
+.v3-side{display:flex;flex-direction:column;gap:16px;min-width:0}
+
+/* ---------- stage ---------- */
+.stage{position:relative;height:clamp(400px,64vh,680px);background:var(--surface);
+  border:1.5px solid var(--line);border-radius:11px;box-shadow:var(--shadow);overflow:hidden}
+.stage canvas{display:block;width:100%;height:100%;touch-action:none}
+.stage-labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.slabel{position:absolute;transform:translate(-50%,-140%);font-family:var(--mono);font-size:10.5px;
+  font-weight:700;letter-spacing:.05em;white-space:nowrap;padding:3px 7px;border-radius:6px;
+  background:var(--surface);border:1.5px solid var(--line2);color:var(--ink2);
+  box-shadow:var(--shadow);transition:border-color .15s,color .15s,opacity .2s}
+.slabel.on{border-color:var(--brand);color:var(--brand2);background:var(--brand-soft)}
+[data-theme="dark"] .slabel.on{color:var(--brand)}
+.slabel.hot{border-color:var(--alert);color:var(--alert);background:var(--alert-bg)}
+.stage-legend{position:absolute;left:12px;top:12px;display:flex;flex-direction:column;gap:5px;
+  font-family:var(--mono);font-size:11px;color:var(--ink2);background:var(--surface);
+  border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;box-shadow:var(--shadow);
+  max-width:min(230px,52%)}
+.stage-legend .lg{display:flex;align-items:center;gap:7px}
+.stage-legend .sw{width:10px;height:10px;border-radius:3px;flex-shrink:0;box-shadow:0 0 6px currentColor}
+.stage-legend .lg b{margin-left:auto;font-weight:700;color:var(--ink);white-space:nowrap}
+.stage-legend .lg.hot{color:var(--alert)}
+.stage-hint{position:absolute;right:12px;bottom:11px;font-family:var(--mono);font-size:10.5px;
+  color:var(--ink3);background:var(--surface);border:1.5px solid var(--line);
+  padding:5px 9px;border-radius:7px;box-shadow:var(--shadow)}
+.stage-hint kbd{font-family:inherit;background:var(--surface2);border:1px solid var(--line2);
+  border-radius:4px;padding:1px 5px}
+.stage-load{position:absolute;inset:0;display:grid;place-items:center;text-align:center;
+  font-family:var(--mono);font-size:13px;color:var(--ink2);background:var(--surface);
+  padding:24px;line-height:1.7}
+.stage-load[hidden]{display:none}
+.stage-load.err{color:var(--crit);background:var(--crit-bg);border-color:var(--crit)}
+
+/* ---------- controls ---------- */
+.ctlrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.seg{display:inline-flex;gap:5px}
+.seg .btn{font-family:var(--mono)}
+.btn.on{background:var(--brand-soft);border-color:var(--brand);color:var(--brand2)}
+[data-theme="dark"] .btn.on{color:var(--brand)}
+.fault-note{margin-top:10px}
+#faultBtns{margin-top:4px}
+
+/* ---------- side panels ---------- */
+.v3-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.v3-metrics .m-val{font-size:30px}
+.v3-metrics .v3-span{grid-column:1 / -1}
+.v3-side .panel{padding:16px 18px}
+.v3-side .evi li{font-size:13.5px}
+.v3-side .checks li{font-size:13.5px}
+.v3-side .rule{font-size:13px}
+.v3-side .srcnote{font-size:11.5px}
+.v3-side code{font-family:var(--mono);font-size:12px}
+.selrow{display:flex;gap:10px;align-items:baseline;font-size:13.5px;padding:3px 0}
+.selrow .muted{flex-shrink:0;width:78px;font-size:12px}
+.selrow b{font-family:var(--mono);font-weight:700}
+
+/* ---------- responsive ---------- */
+@media(max-width:900px){
+  .v3-grid{grid-template-columns:1fr}
+  .stage{height:clamp(320px,52vh,460px)}
+  .v3-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stage-legend{font-size:10px;padding:7px 9px}
+  .stage-hint{display:none}
+}
+@media(max-width:520px){
+  .v3-metrics{grid-template-columns:1fr}
+  .v3-metrics .v3-span{grid-column:auto}
+}

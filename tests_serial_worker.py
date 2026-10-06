@@ -1,0 +1,95 @@
+"""Serial ingestion checks. Run: python tests_serial_worker.py"""
+import os
+import sys
+import unittest
+from unittest.mock import patch
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "src", "backend"))
+
+from serial_worker import SerialWorker, parse_line  # noqa: E402
+
+
+class FakeSerial:
+    name = "fake-port"
+
+    def __init__(self, lines):
+        self.lines = iter(lines)
+        self.closed = False
+
+    def readline(self):
+        return next(self.lines, b"")
+
+    def close(self):
+        self.closed = True
+
+
+class SerialWorkerChecks(unittest.TestCase):
+    def test_parse_line_preserves_timestamp_and_numeric_channels(self):
+        packet = parse_line(
+            '{"timestamp":"2026-10-06T11:00:00+05:30","temp":28.5,'
+            '"rh":78,"fork_raw":1023,"ldr_raw":12,"distance_cm":15}'
+        )
+        self.assertEqual(packet["timestamp"], "2026-10-06T11:00:00+05:30")
+        self.assertEqual(packet["temp"], 28.5)
+        self.assertEqual(packet["fork_raw"], 1023.0)
+
+    def test_parse_line_rejects_malformed_and_non_finite_only_packets(self):
+        self.assertIsNone(parse_line("not json"))
+        self.assertIsNone(parse_line('{"temp": NaN}'))
+        self.assertIsNone(parse_line('{"temp": 1e999}'))
+
+    def test_hardware_packets_use_live_source_and_close_serial(self):
+        serial = FakeSerial([
+            b'{"temp":28.5,"rh":78,"fork_raw":1023,"ldr_raw":12,'
+            b'"distance_cm":15}\n'
+        ])
+        packets = []
+        worker = SerialWorker(lambda packet, source: (packets.append((packet, source)),
+                                                       worker.stop()))
+
+        worker._hardware_loop(serial)
+
+        self.assertEqual(len(packets), 1)
+        self.assertEqual(packets[0][1], "LIVE")
+        self.assertTrue(serial.closed)
+
+    def test_worker_retries_after_initial_serial_failure(self):
+        worker = SerialWorker(lambda packet, source: None)
+        attempts = []
+        mock_modes = []
+        serial = FakeSerial([])
+
+        def open_serial():
+            attempts.append(True)
+            if len(attempts) == 1:
+                raise OSError("not attached yet")
+            return serial
+
+        def mock_loop(duration=None):
+            mock_modes.append(worker.mode)
+
+        def hardware_loop(_serial):
+            worker.stop()
+
+        worker._open_serial = open_serial
+        worker._mock_loop = mock_loop
+        worker._hardware_loop = hardware_loop
+        worker.run()
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(mock_modes, ["MOCK"])
+        self.assertEqual(worker.mode, "LIVE")
+
+    def test_hardware_staleness_closes_and_reports_disconnected_device(self):
+        serial = FakeSerial([])
+        worker = SerialWorker(lambda packet, source: None)
+        with patch("serial_worker.STALE_SECONDS", 1), \
+                patch("serial_worker.time.monotonic", side_effect=[0, 2]):
+            with self.assertRaisesRegex(TimeoutError, "no valid sensor packets"):
+                worker._hardware_loop(serial)
+        self.assertTrue(serial.closed)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3,6 +3,9 @@ data/storage.db
 data/storage.db-shm
 data/storage.db-wal
 *.log
+blender/out/*.blend
+blender/out/*.png
+blender/out_build.log
 
 # --- python ---
 __pycache__/

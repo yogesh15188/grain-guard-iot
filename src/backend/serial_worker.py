@@ -6,14 +6,18 @@ firmware; it only reads the JSON line the firmware already emits.
 """
 from __future__ import annotations
 
-import glob
 import json
+import math
 import os
 import threading
 import time
 
+from mock_data import MockGenerator
+
 PORT = os.environ.get("GRAINGUARD_SERIAL_PORT", "")
 BAUD = int(os.environ.get("GRAINGUARD_SERIAL_BAUD", "9600"))
+RETRY_SECONDS = max(1.0, float(os.environ.get("GRAINGUARD_SERIAL_RETRY_SECONDS", "5")))
+STALE_SECONDS = max(2.0, float(os.environ.get("GRAINGUARD_SERIAL_STALE_SECONDS", "15")))
 FIELDS = ("temp", "rh", "fork_raw", "ldr_raw", "distance_cm")
 
 
@@ -28,10 +32,17 @@ def parse_line(line: str):
     if not isinstance(obj, dict):
         return None
     out = {}
+    if isinstance(obj.get("timestamp"), str):
+        out["timestamp"] = obj["timestamp"]
     for key in FIELDS:
         val = obj.get(key)
         if isinstance(val, (int, float)) and not isinstance(val, bool):
-            out[key] = float(val)
+            try:
+                number = float(val)
+            except (OverflowError, ValueError):
+                continue
+            if math.isfinite(number):
+                out[key] = number
     return out or None
 
 
@@ -48,7 +59,7 @@ class SerialWorker(threading.Thread):
         self.mode = "MOCK"           # MOCK | LIVE | SIMULATION
         self.detail = "starting"
         self.last_error = None
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
 
     # -- hardware --------------------------------------------------------
     def _open_serial(self):
@@ -58,59 +69,80 @@ class SerialWorker(threading.Thread):
             raise RuntimeError("pyserial not installed")
         port = PORT or self._first_port()
         if not port:
-            raise RuntimeError("no serial port found")
+            raise RuntimeError("no serial device found")
         return serial.Serial(port, BAUD, timeout=2)
 
     @staticmethod
     def _first_port():
         try:
-            ports = glob.glob("COM*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
-            return sorted(ports)[0] if ports else None
-        except OSError:
+            from serial.tools import list_ports
+            ports = sorted(port.device for port in list_ports.comports())
+            return ports[0] if ports else None
+        except (ImportError, OSError):
             return None
 
     def _hardware_loop(self, ser):
-        while not self._stop.is_set():
-            raw = ser.readline()
-            if not raw:
-                continue
-            packet = parse_line(raw.decode("utf-8", "ignore"))
-            if packet:
-                self.on_packet(packet, "LIVE")
-        ser.close()
+        last_packet = time.monotonic()
+        try:
+            while not self._stop_event.is_set():
+                raw = ser.readline()
+                if not raw:
+                    if time.monotonic() - last_packet >= STALE_SECONDS:
+                        raise TimeoutError(
+                            f"no valid sensor packets for {STALE_SECONDS:g} seconds")
+                    continue
+                packet = parse_line(raw.decode("utf-8", "ignore"))
+                if packet:
+                    self.on_packet(packet, "LIVE")
+                    last_packet = time.monotonic()
+        finally:
+            ser.close()
 
     # -- mock loop -------------------------------------------------------
-    def _mock_loop(self):
-        base = dict(self.mock_packet)
-        while not self._stop.is_set():
-            packet = dict(base)
-            # Gentle drift so the dashboard feels alive without faking risk.
-            packet["temp"] = round(packet.get("temp", 27.0) + _drift(), 2)
-            packet["rh"] = round(min(100.0, max(0.0, packet.get("rh", 60.0) + _drift() * 2)), 2)
-            packet["distance_cm"] = round(packet.get("distance_cm", 15.0) + _drift() * 0.3, 2)
-            self.on_packet(packet, self.mode)
-            time.sleep(self.interval)
+    def _mock_loop(self, duration=None):
+        """Emit physically plausible mock telemetry.
+
+        Uses mock_data.MockGenerator so the demo behaves like a real bin:
+        damped diurnal swing, ADC read noise, and occasional damp-ingress
+        episodes. The generator never invents a hazard on its own - risk is
+        still decided only by the deterministic engine reading these numbers.
+        """
+        gen = MockGenerator(base=self.mock_packet)
+        last = time.time()
+        end = time.monotonic() + duration if duration is not None else None
+        while not self._stop_event.is_set() \
+                and (end is None or time.monotonic() < end):
+            now = time.time()
+            dt = max(0.0, min(now - last, 5.0)) or self.interval
+            last = now
+            self.on_packet(gen.step(dt, now), self.mode)
+            self._stop_event.wait(self.interval)
 
     def stop(self):
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self):
-        try:
-            self.mode = "LIVE"
-            self.detail = f"opening serial on {PORT or 'auto'}"
-            ser = self._open_serial()
-            self.detail = f"connected to {ser.name}"
-            self._hardware_loop(ser)
-        except Exception as exc:                     # noqa: BLE001 - must not crash
-            self.last_error = str(exc)[:200]
-            self.mode = "MOCK"
-            self.detail = f"HARDWARE OFFLINE — SIMULATION MODE ({exc})"[:200]
+        while not self._stop_event.is_set():
             try:
-                self._mock_loop()
-            except Exception:                        # noqa: BLE001
-                pass
-
-
-def _drift() -> float:
-    import random
-    return round(random.uniform(-0.05, 0.05), 3)
+                self.mode = "LIVE"
+                self.detail = f"connecting to serial on {PORT or 'auto'}"
+                ser = self._open_serial()
+                self.last_error = None
+                self.detail = f"connected to {ser.name}"
+                self._hardware_loop(ser)
+                if self._stop_event.is_set():
+                    return
+                raise RuntimeError("serial stream ended")
+            except Exception as exc:                 # noqa: BLE001 - worker must keep retrying
+                self.last_error = str(exc)[:200]
+                self.mode = "MOCK"
+                self.detail = (
+                    f"HARDWARE OFFLINE — SIMULATION MODE; retrying in "
+                    f"{RETRY_SECONDS:g}s ({self.last_error})"
+                )[:240]
+                try:
+                    self._mock_loop(duration=RETRY_SECONDS)
+                except Exception as callback_error:  # noqa: BLE001
+                    self.last_error = str(callback_error)[:200]
+                    self.detail = f"SIMULATION PIPELINE ERROR ({self.last_error})"[:240]
+                    self._stop_event.wait(RETRY_SECONDS)

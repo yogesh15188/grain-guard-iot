@@ -24,6 +24,8 @@ running on mock telemetry.
 ```bash
 python run.py --no-open     # server only
 python tests_check.py       # verify engine against all scenarios
+python tests_serial_worker.py  # verify serial ingestion and reconnection
+python tests_csv_worker.py  # verify CSV import and append monitoring
 ```
 
 ---
@@ -76,6 +78,25 @@ handles both live and simulated data.
 Also try: switch **Operator Mode / Manager Mode**, toggle the light/dark theme,
 and use the Ack buttons to show the audit trail.
 
+The **Recent Trend** panel plots the last 60 stored readings from `/api/history`
+with the configured RH ingress limit drawn as a reference line, so you can show
+how close the bin came to the limit over time. The chart only renders stored
+numbers — it never scores risk.
+
+### Mock data in simulation mode
+
+With no Arduino attached, `mock_data.py` feeds the pipeline a physically
+plausible bin instead of a flat line: a damped diurnal temperature swing (peak
+~15:00 IST, lagging ~2.5 h behind ambient because of the grain's thermal mass),
+RH moving inversely with temperature, ADC read noise on the raw channels, and
+occasional damp-ingress episodes that raise RH, drop temperature and admit light
+at the shutter.
+
+The generator emits **numbers only**. It has no knowledge of engine thresholds
+or states, and its ambient baseline deliberately sits below the ingress limit, so
+the resting demo state is `S0`/`S3`. Any risk you see was decided by the
+deterministic engine reading that stream, exactly as it would for real hardware.
+
 A scenario result is held on screen for 60 s so judges can read it; live mock
 telemetry then resumes automatically.
 
@@ -87,7 +108,7 @@ telemetry then resumes automatically.
 |---|---|---|
 | GET  | `/api/status` | current state, risk, evidence, mode |
 | POST | `/api/telemetry` | push one live telemetry packet |
-| GET  | `/api/history` | recent telemetry rows |
+| GET  | `/api/history` | recent telemetry rows (drives the Trend chart) |
 | GET  | `/api/events` | event log, acks, ledger chain check |
 | POST | `/api/simulate/{id}` | run a scenario through the live pipeline |
 | POST | `/api/acknowledge` | record a verified / unverified ack |
@@ -99,6 +120,36 @@ Telemetry shape:
 ```
 
 Missing or invalid fields are reported, never guessed, and never crash the app.
+
+### Connect an IoT controller
+
+The backend reads newline-terminated JSON from an Arduino-compatible USB serial
+connection at **9600 baud** by default. Send one JSON object per line using the
+same field names and units as the API, for example:
+
+```json
+{"timestamp":"2026-10-06T11:00:00+05:30","temp":28.5,"rh":78.0,"fork_raw":1023,"ldr_raw":12,"distance_cm":15.0}
+```
+
+Map your sensor readings to `temp` in °C, `rh` in percent, `fork_raw` and
+`ldr_raw` as 0–1023 ADC readings, and `distance_cm` in centimetres. The
+controller firmware must perform any required sensor calibration and emit this
+line format; the backend does not guess or calibrate hardware values.
+
+Set `GRAINGUARD_SERIAL_PORT` to the controller's port (for example `COM5`) when
+more than one serial device is attached. Otherwise, GrainGuard discovers a
+connected serial port automatically. Each valid packet is run through the same
+physics and deterministic risk engine as the dashboard scenarios, then saved
+to the local SQLite telemetry history and hash chain. The dashboard refreshes
+automatically. If the device is unplugged or stops sending packets, the
+dashboard clearly marks the simulated fallback and the worker keeps retrying
+the hardware connection.
+
+For a Wi-Fi controller, POST the same JSON object to `/api/telemetry` with
+`Content-Type: application/json`; it is also processed and saved immediately.
+The server binds to `127.0.0.1` by default. For a trusted local network, set
+`GRAINGUARD_HOST=0.0.0.0` and allow the chosen port through the host firewall;
+the controller can then post to `http://<computer-lan-ip>:8000/api/telemetry`.
 ---
 
 ## How the decision is made
@@ -150,7 +201,9 @@ grain-guard/
 │   ├── physics.py       # EMC, dew point, Δheight, stress hours
 │   ├── engine.py        # ordered rule engine -> state/risk/facts/interlock
 │   ├── database.py      # SQLite WAL + hash-chained ledger
+│   ├── csv_worker.py    # append-only CSV import and monitoring
 │   ├── slm_forensics.py # optional narrative, 2s timeout, hard fallback
+│   ├── mock_data.py     # realistic mock telemetry for simulation mode
 │   └── serial_worker.py # serial reader -> automatic mock fallback
 ├── src/frontend/        # index.html, styles.css, app.js (no frameworks)
 ├── data/                # scenarios, facility profile, SQLite ledger
@@ -158,11 +211,43 @@ grain-guard/
 └── tests_check.py       # engine verification
 ```
 
+Three.js is bundled locally for the optional 3D hardware viewer; its MIT
+license is included under `src/frontend/vendor/LICENSES/`.
+
 ## Config (optional)
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `GRAINGUARD_PORT` | `8000` | server port |
+| `GRAINGUARD_HOST` | `127.0.0.1` | bind address; use `0.0.0.0` for LAN devices |
 | `GRAINGUARD_SERIAL_PORT` | auto | e.g. `COM5` |
+| `GRAINGUARD_SERIAL_BAUD` | `9600` | serial baud rate |
+| `GRAINGUARD_SERIAL_RETRY_SECONDS` | `5` | wait between connection attempts |
+| `GRAINGUARD_SERIAL_STALE_SECONDS` | `15` | switch to fallback after no valid packet |
+| `GRAINGUARD_CSV_PATH` | unset | append-only sensor CSV to import and monitor |
 | `GRAINGUARD_SLM` | `1` | set `0` to disable the SLM entirely |
 | `GRAINGUARD_SLM_URL` | Ollama | local SLM endpoint |
+
+### Connect a CSV data file
+
+Set `GRAINGUARD_CSV_PATH` to the full path of the sensor CSV before starting
+GrainGuard. When this is set, CSV ingestion is used instead of serial/mock
+telemetry. The file must have a header row containing
+`timestamp,temp,rh,fork_raw,ldr_raw,distance_cm`, with one complete record per
+line and a newline after each record. Existing rows are processed on first
+connection; new appended rows are picked up automatically. The file location
+and byte cursor are stored locally so a restart resumes at the next row rather
+than duplicating the imported history. Replacing or truncating the file starts
+a fresh import.
+
+For example, in PowerShell:
+
+```powershell
+$env:GRAINGUARD_CSV_PATH = "C:\path\to\sensor-readings.csv"
+python run.py
+```
+
+Use ISO-8601 timestamps and the same units as the API. A malformed row is
+reported in the hardware/status banner and skipped without blocking subsequent
+complete rows. Each accepted record is sent through the deterministic risk
+engine and saved to SQLite, where dashboard alerts and history are refreshed.

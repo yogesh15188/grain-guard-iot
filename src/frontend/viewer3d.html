@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GrainGuard — 3D IoT Hardware Model</title>
+<meta name="description" content="Interactive 3D Arduino UNO with the four GrainGuard sensors, driven by a self-contained telemetry simulation.">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="viewer3d.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127807;</text></svg>">
+<script>document.documentElement.dataset.theme=localStorage.getItem('gg-theme')||'light';</script>
+</head>
+<body>
+
+<!-- ================= NAVBAR ================= -->
+<header class="nav">
+  <a class="brand" href="index.html#overview">
+    <svg class="logo" viewBox="0 0 44 44" aria-hidden="true">
+      <path d="M22 4 L38 11 V24 C38 33 31 39 22 41 C13 39 6 33 6 24 V11 Z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+      <ellipse cx="22" cy="17" rx="4.2" ry="5.6" fill="currentColor" transform="rotate(-18 22 17)"/>
+      <ellipse cx="16" cy="24" rx="4.2" ry="5.6" fill="currentColor" transform="rotate(-20 16 24)"/>
+      <ellipse cx="28" cy="24" rx="4.2" ry="5.6" fill="currentColor" transform="rotate(20 28 24)"/>
+    </svg>
+    <span>Grain<strong>Guard</strong></span>
+  </a>
+  <nav class="navlinks">
+    <a href="index.html#overview">Overview</a>
+    <a href="index.html#monitoring">Monitoring</a>
+    <a href="index.html#how">How It Works</a>
+    <a href="index.html#technology">Technology</a>
+    <a href="viewer3d.html" aria-current="page">3D Viewer</a>
+    <a class="btn btn-primary btn-sm" href="index.html#console">Launch Console</a>
+  </nav>
+  <div class="navright">
+    <span class="clock" id="clock">--:--:--</span>
+    <button class="themebtn" id="themeBtn" aria-label="Toggle theme">
+      <span class="sun">&#9728;&#65039;</span><span class="moon">&#127769;</span>
+    </button>
+  </div>
+</header>
+
+<main class="console v3" id="top">
+  <!-- ================= CONSOLE BAR ================= -->
+  <div class="conbar">
+    <div class="cbrand">
+      <svg class="logo sm" viewBox="0 0 44 44" aria-hidden="true">
+        <path d="M22 4 L38 11 V24 C38 33 31 39 22 41 C13 39 6 33 6 24 V11 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+        <ellipse cx="22" cy="17" rx="4" ry="5.2" fill="currentColor"/>
+        <ellipse cx="16.5" cy="24" rx="4" ry="5.2" fill="currentColor"/>
+        <ellipse cx="27.5" cy="24" rx="4" ry="5.2" fill="currentColor"/>
+      </svg>
+      <span>GrainGuard</span>
+    </div>
+    <div class="cbarinfo">
+      <span class="muted">Scene:</span> <b>Arduino UNO R3 &middot; 4 sensors</b>
+      <span class="sep">|</span>
+      <span id="clock2">--</span>
+    </div>
+    <div class="cbarmode">
+      <span class="hwflag">OFFLINE &mdash; NO BACKEND</span>
+      <span class="modepill sim">LOCAL MIRROR</span>
+      <button class="themebtn" id="themeBtn2" aria-label="Toggle theme">
+        <span class="sun">&#9728;&#65039;</span><span class="moon">&#127769;</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= STATUS HERO ================= -->
+  <section class="status-hero v3-hero" id="statusHero">
+    <div class="sh-left">
+      <span class="sh-label">STORAGE STATUS</span>
+      <h2 class="sh-state" id="shState">STARTING</h2>
+      <p class="sh-sub" id="shSub">Booting the local telemetry simulation&hellip;</p>
+      <code class="sh-statecode" id="shCode"></code>
+    </div>
+    <div class="sh-right">
+      <div class="riskbox risk-low" id="riskBox">
+        <span class="rb-label">RISK <span class="tag">mirror</span></span>
+        <span class="rb-value" id="riskValue">&mdash;</span>
+      </div>
+      <div class="aerbox aer-locked" id="aerBox">
+        <span class="ab-label">AERATION</span>
+        <span class="ab-value" id="aerValue">LOCKED</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="v3-grid">
+    <!-- ================= LEFT: SCENE + CONTROLS ================= -->
+    <div class="v3-left">
+      <div class="stage" id="stage">
+        <canvas id="scene"></canvas>
+        <div class="stage-labels" id="labels"></div>
+        <div class="stage-legend" id="legend"></div>
+        <div class="stage-hint">
+          <kbd>drag</kbd> orbit &nbsp;&middot;&nbsp; <kbd>scroll</kbd> zoom &nbsp;&middot;&nbsp; click a sensor to inspect
+        </div>
+        <div class="stage-load" id="stageLoad">Loading 3D engine&hellip;</div>
+      </div>
+
+      <section class="card panel">
+        <h3 class="ph">CONTROLS <span class="tag">live sim</span></h3>
+        <div class="ctlrow">
+          <button class="btn btn-ghost btn-sm" id="btnPlay" type="button">Pause</button>
+          <div class="seg" id="speedSeg" role="group" aria-label="Simulation speed">
+            <button class="btn btn-ghost btn-sm" data-speed="0.5" type="button">0.5&times;</button>
+            <button class="btn btn-ghost btn-sm on" data-speed="1" type="button">1&times;</button>
+            <button class="btn btn-ghost btn-sm" data-speed="4" type="button">4&times;</button>
+          </div>
+          <button class="btn btn-ghost btn-sm on" id="btnWires" type="button">Wires</button>
+          <button class="btn btn-ghost btn-sm on" id="btnLabels" type="button">Labels</button>
+          <button class="btn btn-ghost btn-sm" id="btnCam" type="button">Reset view</button>
+        </div>
+
+        <h4 class="ph sm">Fault injection <span class="tag">60 s hold</span></h4>
+        <div class="simbtns" id="faultBtns">
+          <button class="simbtn on" data-fault="normal" type="button">Normal<small>S0 / LOW</small></button>
+          <button class="simbtn" data-fault="humidity_intrusion" type="button">Humidity Intrusion<small>S1 / HIGH</small></button>
+          <button class="simbtn" data-fault="dunnage_seepage" type="button">Dunnage Seepage<small>S2 / HIGH</small></button>
+          <button class="simbtn" data-fault="stock_anomaly" type="button">Stock Anomaly<small>S4 / MEDIUM-HIGH</small></button>
+          <button class="simbtn" data-fault="offline" type="button">Offline<small>S6 / last reading</small></button>
+        </div>
+        <p class="srcnote" id="ctlNote">
+          Each fault pushes a fixed packet through the same local physics and rule path as
+          the running stream &mdash; the way <code>data/scenarios.json</code> drives the console.
+        </p>
+      </section>
+    </div>
+
+    <!-- ================= RIGHT: HUD ================= -->
+    <aside class="v3-side">
+      <section class="card panel" id="selPanel">
+        <h3 class="ph">SELECTED SENSOR <span class="tag" id="selTag">none</span></h3>
+        <p class="srcnote" id="selText">Click a sensor in the scene to lock its readout and focus the camera.</p>
+      </section>
+
+      <div class="metrics v3-metrics">
+        <div class="card metric" id="mTemp"><span class="m-label">Temperature</span><span class="m-val" id="vTemp">&mdash;</span><span class="m-unit">&deg;C</span></div>
+        <div class="card metric" id="mRh"><span class="m-label">Humidity</span><span class="m-val" id="vRh">&mdash;</span><span class="m-unit">%</span></div>
+        <div class="card metric" id="mFork"><span class="m-label">Fork raw</span><span class="m-val" id="vFork">&mdash;</span></div>
+        <div class="card metric" id="mLdr"><span class="m-label">Light raw</span><span class="m-val" id="vLdr">&mdash;</span></div>
+        <div class="card metric v3-span" id="mDist"><span class="m-label">Distance</span><span class="m-val" id="vDist">&mdash;</span><span class="m-unit">cm</span><span class="m-foot" id="fDist">&Delta;h &mdash;</span></div>
+      </div>
+
+      <section class="card panel">
+        <h3 class="ph">PHYSICS <span class="tag">mirror of physics.py</span></h3>
+        <table class="raw">
+          <tr><th>EMC estimate</th><td id="rEmc">&mdash;</td><th>Dew point</th><td id="rDew">&mdash;</td></tr>
+          <tr><th>Moisture stress</th><td id="rMs">&mdash;</td><th>Thermal stress</th><td id="rTs">&mdash;</td></tr>
+        </table>
+        <p class="srcnote">
+          EMC is an <b>estimate of the moisture the air would reach</b>. It is not a
+          measurement of grain moisture content.
+        </p>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">Pipeline <span class="tag" id="pipeTag">idle</span></h3>
+        <div class="pipeline" id="pipeline">
+          <span class="pstep" data-step="1">Telemetry</span>
+          <span class="parrow">&darr;</span>
+          <span class="pstep" data-step="2">Physics</span>
+          <span class="parrow">&darr;</span>
+          <span class="pstep" data-step="3">Deterministic Engine</span>
+        </div>
+        <p class="srcnote" id="simNote">
+          Generated on this page. The SLM explanation stage is not used here &mdash; this
+          view only renders what the local rule mirror returns.
+        </p>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">WHY? <span class="tag">local mirror</span></h3>
+        <p class="rule" id="ruleText">&mdash;</p>
+        <h4 class="ph sm">Triggered evidence</h4>
+        <ul class="evi" id="eviList"></ul>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">WHAT SHOULD BE CHECKED?</h3>
+        <ol class="checks" id="checkList"></ol>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">HONEST LIMITS <span class="tag">README</span></h3>
+        <p class="srcnote" style="margin-top:0">
+          This model shows <b>evidence and advisory state only</b>. It never claims to
+          detect rodents, pests, fungus or groundwater, and it never claims to have
+          measured actual grain moisture content. Findings are phrased as
+          <em>consistent with</em> &mdash; a human still has to go and look.
+        </p>
+        <p class="srcnote">
+          Pin assignments are <b>representative</b>, not a documented schematic: no
+          firmware pin map exists in this repository. Risk and the aeration interlock on
+          this page are a <b>local JS mirror</b> of <code>src/backend/engine.py</code>,
+          which stays the single source of truth.
+        </p>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="fcol">
+    <span class="brand small">
+      <svg class="logo xs" viewBox="0 0 44 44" aria-hidden="true">
+        <path d="M22 4 L38 11 V24 C38 33 31 39 22 41 C13 39 6 33 6 24 V11 Z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/>
+        <ellipse cx="22" cy="20" rx="4" ry="5" fill="currentColor"/>
+        <ellipse cx="16.5" cy="26" rx="4" ry="5" fill="currentColor"/>
+        <ellipse cx="27.5" cy="26" rx="4" ry="5" fill="currentColor"/>
+      </svg>
+      Grain<strong>Guard</strong>
+    </span>
+    <p>Offline-first early warning for Indian grain storage.</p>
+  </div>
+  <div class="fcol"><h4>Product</h4>
+    <a href="index.html#overview">Overview</a><a href="index.html#monitoring">Monitoring</a>
+    <a href="index.html#how">How It Works</a><a href="index.html#console">Launch Console</a>
+  </div>
+  <div class="fcol"><h4>Technology</h4>
+    <a href="index.html#technology">Detect &rarr; Reason &rarr; Act</a><a href="index.html#how">Physics layer</a>
+    <a href="viewer3d.html">3D hardware model</a>
+  </div>
+  <div class="fcol"><h4>Honest limits</h4>
+    <p>Sensors do not detect pests, fungus, rodents or groundwater. EMC is an air estimate, not measured grain moisture.</p>
+  </div>
+</footer>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/"
+  }
+}
+</script>
+<script type="module" src="viewer3d.js"></script>
+</body>
+</html>

@@ -9,7 +9,6 @@ const fmt = (v, nd = 1, dash = '—') =>
 const RISK_CLASS = { 'LOW': 'risk-low', 'MEDIUM': 'risk-med', 'MEDIUM-HIGH': 'risk-high', 'HIGH': 'risk-high', 'CRITICAL': 'risk-crit' };
 let LIMITS = {};
 let SCENARIOS = [];
-let activeScenario = null;
 
 /* ---------------- theme ---------------- */
 function setTheme(t) {
@@ -80,6 +79,109 @@ function paintMimic(f) {
   const probe = $('mProbe');
   if (fork != null) probe.style.stroke = fork < forkLow ? 'var(--crit)' : fork >= forkLoaded ? 'var(--ink2)' : 'var(--watch)';
 }
+/* ---------------- alerts ----------------
+   The UI renders alerts and sounds a tone. It never computes one: every alert
+   on screen came from the server's deterministic alerts.py. */
+let MUTED = localStorage.getItem('gg-muted') === '1';
+let SOUND = localStorage.getItem('gg-sound') !== '0';
+let seenAlerts = new Set();
+let audioCtx = null;
+
+/* Short beep via WebAudio. No audio files, so it works with no network.
+   Critical = urgent triple tone, danger = two, warning = one. */
+function beep(severity) {
+  if (MUTED || !SOUND) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!audioCtx) audioCtx = new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const pattern = severity === 'critical' ? [880, 1180, 880]
+      : severity === 'danger' ? [700, 950] : [560];
+    pattern.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const t0 = now + i * 0.17;
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(freq, t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.14, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.16);
+    });
+  } catch (e) { /* audio is a nicety; never break the dashboard over it */ }
+}
+
+function toast(a) {
+  const box = $('toasts');
+  if (!box) return;
+  const el = document.createElement('div');
+  el.className = 'toast ' + (a.severity || 'warning');
+  el.innerHTML = `<b>${esc(a.title)}</b><small>${esc(a.evidence)}</small>` +
+    `<div class="t-ev">${esc(a.key)}</div>`;
+  el.onclick = () => el.remove();
+  box.appendChild(el);
+  setTimeout(() => el.remove(), a.severity === 'critical' ? 14000 : 8000);
+  while (box.children.length > 4) box.firstChild.remove();
+}
+
+function renderAlerts(payload) {
+  const A = payload.alerts || { alerts: [], new: [] };
+  const list = A.alerts || [];
+  const banner = $('alertBanner');
+
+  /* active alert cards */
+  const box = $('alertList');
+  if (box) {
+    box.innerHTML = list.length
+      ? list.map((a) => `<li class="acard ${esc(a.severity)}">
+          <div class="a-head"><span class="a-sev">${esc(a.severity)}</span>
+            <span class="a-key">${esc(a.key)}</span></div>
+          <div class="a-title">${esc(a.title)}</div>
+          <div class="a-ev">${esc(a.evidence)}</div>
+          <div class="a-cons">${esc(a.consistency)}</div>
+          <ol class="a-list">${(a.actions || []).map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+        </li>`).join('')
+      : '<li class="muted">No alerts active. Conditions are within limits.</li>';
+  }
+  const cnt = $('alertCount');
+  if (cnt) cnt.textContent = list.length ? `${list.length} active` : 'none';
+
+  /* banner for the most severe alert */
+  const top = A.top || list[0] || null;
+  if (banner) {
+    if (top) {
+      banner.hidden = false;
+      banner.className = 'alertbanner ' + top.severity;
+      banner.innerHTML = `<span class="ab-ico">${
+        top.severity === 'critical' ? '⛔' : top.severity === 'danger' ? '⚠' : 'ℹ'}</span>
+        <span class="ab-txt"><b>${esc(top.title)}</b><small>${esc(top.evidence)}</small></span>
+        <button class="ab-close" type="button" aria-label="Dismiss">×</button>`;
+      banner.querySelector('.ab-close').onclick = () => { banner.hidden = true; };
+    } else {
+      banner.hidden = true;
+    }
+  }
+
+  /* only fire a toast/beep for genuinely NEW alerts, so a persistent
+     condition does not re-announce itself every poll */
+  (A.new || []).forEach((a) => {
+    const sig = a.key + '|' + a.evidence;
+    if (seenAlerts.has(sig)) return;
+    seenAlerts.add(sig);
+    toast(a);
+    beep(a.severity);
+  });
+  const live = new Set(list.map((a) => a.key));
+  seenAlerts.forEach((sig) => { if (!live.has(sig.split('|')[0])) seenAlerts.delete(sig); });
+
+  const mb = $('muteBtn');
+  if (mb) mb.textContent = MUTED ? 'Unmute' : 'Mute';
+}
+
 /* ---------------- main render ---------------- */
 function renderStatus(payload) {
   const r = payload.result;
@@ -93,23 +195,40 @@ function renderStatus(payload) {
 
   const hw = $('hwFlag');
   const detail = payload.source_detail || '';
-  if (/HARDWARE OFFLINE/i.test(detail)) {
+  if (payload.pipeline_error) {
+    hw.textContent = 'DATA PIPELINE ERROR';
+    hw.className = 'hwflag';
+    hw.title = payload.pipeline_error;
+  } else if (/HARDWARE OFFLINE/i.test(detail)) {
     hw.textContent = 'HARDWARE OFFLINE — SIMULATION MODE';
     hw.className = 'hwflag';
   } else if (/connected/i.test(detail)) {
     hw.textContent = 'HARDWARE LIVE';
     hw.className = 'hwflag ok';
+  } else if (/CSV LIVE/i.test(detail)) {
+    hw.textContent = 'CSV FILE LIVE';
+    hw.className = 'hwflag ok';
+  } else if (/CSV (INPUT|PIPELINE) ERROR/i.test(detail)) {
+    hw.textContent = 'CSV INPUT ERROR';
+    hw.className = 'hwflag';
+  } else if (/connecting/i.test(detail)) {
+    hw.textContent = 'CONNECTING TO HARDWARE';
+    hw.className = 'hwflag';
   } else {
     hw.textContent = 'MOCK TELEMETRY — SIMULATION MODE';
     hw.className = 'hwflag';
   }
-  hw.title = detail;
+  if (!payload.pipeline_error) hw.title = detail;
 
   // While a scenario is held on screen, say so instead of letting the operator
   // wonder why the live mock numbers are not moving.
   if (payload.sim_hold_seconds > 0) {
-    $('simNote').textContent = `Simulation held for ${Math.ceil(payload.sim_hold_seconds)}s so the result stays readable. Live mock telemetry resumes automatically.`;
+    $('simNote').textContent = `Scenario held for ${Math.ceil(payload.sim_hold_seconds)}s so the result stays readable. The sensor stream or clearly labeled simulation fallback resumes automatically.`;
   }
+
+  // Alerts render regardless of whether a sensor result exists yet, so a
+  // device or audit alert is still visible on a cold start.
+  renderAlerts(payload);
 
   if (!r) return;
 
@@ -179,6 +298,77 @@ function renderStatus(payload) {
   paintMimic(f);
 }
 
+/* ---------------- trend chart (renders stored history only) ----------------
+   The chart plots rows from /api/history. It performs no risk analysis and
+   draws no risk band: the dashed RH line is the configured ingress limit, so
+   a judge can see how close readings came to it over time. */
+const TREND_W = 560, TREND_H = 200, TREND_PAD = 26;
+
+function renderTrend(rows) {
+  const svg = $('trendChart');
+  const pts = (rows || []).filter((r) => r.rh != null || r.temp != null);
+  if (pts.length < 2) {
+    svg.innerHTML = `<text class="empty" x="${TREND_W / 2}" y="${TREND_H / 2}" ` +
+      `text-anchor="middle">Collecting readings&hellip;</text>`;
+    $('trendMeta').textContent = `${pts.length} reading(s) stored`;
+    return;
+  }
+
+  const rhLim = LIMITS.rh_limit ?? 65;
+  const vals = pts.flatMap((r) => [r.rh, r.temp]).filter((v) => v != null);
+  // Scale covers the data with a little headroom, and always includes the RH limit.
+  let lo = Math.min(...vals, rhLim) - 2;
+  let hi = Math.max(...vals, rhLim) + 2;
+  const n = pts.length;
+  const x = (i) => TREND_PAD + (i * (TREND_W - TREND_PAD * 2)) / (n - 1);
+  const y = (v) => TREND_H - TREND_PAD - ((v - lo) / (hi - lo)) * (TREND_H - TREND_PAD * 2);
+
+  const path = (key) => {
+    // A row can be missing a channel (bad packet). Break the line at the gap
+    // rather than emitting NaN, which would silently kill the whole path.
+    let d = '', pen = false;
+    pts.forEach((r, i) => {
+      const v = r[key];
+      if (v == null || !Number.isFinite(v)) { pen = false; return; }
+      d += `${pen ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)} `;
+      pen = true;
+    });
+    return d.trim();
+  };
+
+  const grid = [0, 0.5, 1].map((f) => {
+    const gy = (TREND_PAD + f * (TREND_H - TREND_PAD * 2)).toFixed(1);
+    return `<line class="grid" x1="${TREND_PAD}" y1="${gy}" x2="${TREND_W - TREND_PAD}" y2="${gy}"/>`;
+  }).join('');
+
+  const last = pts[pts.length - 1];
+  const when = last.ts ? new Date(last.ts) : null;
+  $('trendMeta').textContent =
+    `${n} readings · ${when && !isNaN(when)
+      ? when.toLocaleTimeString('en-GB', { ...IST, hour: '2-digit', minute: '2-digit' })
+      : '—'}`;
+
+  svg.innerHTML =
+    grid +
+    // configured ingress limit, drawn as a reference the readings are judged against
+    `<line class="lim" x1="${TREND_PAD}" y1="${y(rhLim).toFixed(1)}" x2="${TREND_W - TREND_PAD}" y2="${y(rhLim).toFixed(1)}"/>` +
+    `<text class="limtxt" x="${TREND_W - TREND_PAD}" y="${(y(rhLim) - 4).toFixed(1)}" text-anchor="end">RH limit ${rhLim}%</text>` +
+    `<text class="axistxt" x="4" y="${y(hi).toFixed(1)}">${hi.toFixed(0)}</text>` +
+    `<text class="axistxt" x="4" y="${y(lo + 4).toFixed(1)}">${lo.toFixed(0)}</text>` +
+    `<path class="series s-rh" d="${path('rh')}"/>` +
+    `<path class="series s-temp" d="${path('temp')}"/>`;
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch('/api/history?limit=60');
+    const data = await res.json();
+    renderTrend(data.history || []);
+  } catch (e) {
+    $('trendMeta').textContent = 'History unavailable';
+  }
+}
+
 /* ---------------- events timeline ---------------- */
 async function loadEvents() {
   try {
@@ -214,7 +404,6 @@ function buildScenarioButtons(list) {
 async function triggerScenario(id, btn) {
   document.querySelectorAll('.simbtn').forEach((b) => b.classList.remove('on'));
   if (btn) btn.classList.add('on');
-  activeScenario = id;
   $('simNote').textContent = `Running scenario "${id}" through the live pipeline…`;
   runPipeline();
   try {
@@ -235,6 +424,53 @@ async function triggerScenario(id, btn) {
     $('simNote').textContent = 'Scenario request failed: ' + err.message;
   }
   loadEvents();
+  loadHistory();
+}
+
+/* ---------------- manual telemetry entry ---------------- */
+async function submitReading(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = $('readingSubmit');
+  const values = Object.fromEntries(new FormData(form).entries());
+  const packet = Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, Number(value)])
+  );
+
+  submit.disabled = true;
+  $('readingMessage').textContent = 'Sending reading through the risk engine…';
+  try {
+    const response = await fetch('/api/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(packet),
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `Request failed (${response.status})`);
+    }
+    const result = await response.json();
+    const statusResponse = await fetch('/api/status');
+    const status = statusResponse.ok ? await statusResponse.json() : {};
+    renderStatus({
+      ...status,
+      result,
+      mode: result.mode || 'LIVE',
+      limits: status.limits || LIMITS,
+      facility: status.facility || { name: 'Demo Rice Storage' },
+      server_time: result.timestamp,
+    });
+    form.reset();
+    $('readingMessage').textContent =
+      `Reading saved. Engine result: ${result.state} / ${result.risk}.`;
+    runPipeline();
+    loadHistory();
+    loadEvents();
+  } catch (error) {
+    $('readingMessage').textContent = `Could not process reading: ${error.message}`;
+  } finally {
+    submit.disabled = false;
+  }
 }
 
 /* ---------------- acknowledge ---------------- */
@@ -298,11 +534,37 @@ function init() {
 
   $('ackVerified').addEventListener('click', () => acknowledge(true));
   $('ackUnverified').addEventListener('click', () => acknowledge(false));
+  $('readingForm').addEventListener('submit', submitReading);
+
+  /* alert controls */
+  const st = $('soundToggle');
+  if (st) {
+    st.checked = SOUND;
+    st.addEventListener('change', () => {
+      SOUND = st.checked;
+      localStorage.setItem('gg-sound', SOUND ? '1' : '0');
+      if (SOUND) beep('warning');
+    });
+  }
+  $('muteBtn')?.addEventListener('click', () => {
+    MUTED = !MUTED;
+    localStorage.setItem('gg-muted', MUTED ? '1' : '0');
+    $('muteBtn').textContent = MUTED ? 'Unmute' : 'Mute';
+    if (!MUTED) beep('warning');
+  });
+  $('testAlertBtn')?.addEventListener('click', () => {
+    toast({ key: 'TEST', severity: 'critical', title: 'Test alert',
+            evidence: 'This is a demonstration tone. Nothing is wrong with the bin.' });
+    beep('critical');
+  });
 
   tickClock();
   setInterval(tickClock, 1000);
   poll();
   setInterval(poll, 1000);
+  // History drives the trend chart; refresh it with the other panels.
+  loadHistory();
+  setInterval(loadHistory, 5000);
   setInterval(loadEvents, 5000);
 }
 

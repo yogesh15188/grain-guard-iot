@@ -122,6 +122,11 @@
     <button class="mtab" data-view="manager">Manager Mode</button>
   </div>
 
+  <!-- ALERT BANNER -->
+  <div id="alertBanner" class="alertbanner" role="alert" aria-live="assertive" hidden></div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
   <!-- HERO STATUS -->
   <section class="status-hero" id="statusHero">
     <div class="sh-left">
@@ -149,7 +154,31 @@
     <div class="card metric" id="mEmc"><span class="m-label">EMC Estimate</span><span class="m-val" id="vEmc">&mdash;</span><span class="m-unit">%</span><span class="m-foot">air estimate, not grain moisture</span></div>
     <div class="card metric" id="mDh"><span class="m-label">Headspace Change</span><span class="m-val" id="vDh">&mdash;</span><span class="m-unit">cm</span><span class="m-foot" id="fDh">baseline &mdash;</span></div>
   </section>
-<div class="grid2">
+  <section class="card panel" aria-labelledby="readingTitle">
+    <h3 class="ph" id="readingTitle">Enter a sensor reading <span class="tag">manual</span></h3>
+    <p class="srcnote">Enter the values from your sensors. Submit sends them through the risk engine and saves the reading in history.</p>
+    <form class="reading-form" id="readingForm">
+      <label>Temperature (&deg;C)
+        <input name="temp" type="number" min="-10" max="70" step="any" required>
+      </label>
+      <label>Relative humidity (%)
+        <input name="rh" type="number" min="0" max="100" step="any" required>
+      </label>
+      <label>Fork raw (0&ndash;1023)
+        <input name="fork_raw" type="number" min="0" max="1023" step="1" required>
+      </label>
+      <label>Light raw (0&ndash;1023)
+        <input name="ldr_raw" type="number" min="0" max="1023" step="1" required>
+      </label>
+      <label>Distance (cm)
+        <input name="distance_cm" type="number" min="0" max="1000" step="any" required>
+      </label>
+      <button class="btn btn-primary btn-sm" id="readingSubmit" type="submit">Process &amp; save reading</button>
+    </form>
+    <p class="srcnote" id="readingMessage" role="status" aria-live="polite">All five sensor values are required.</p>
+  </section>
+
+  <div class="grid2">
     <div class="col">
       <section class="card panel">
         <h3 class="ph">WHY?</h3>
@@ -197,12 +226,46 @@
       </section>
 
       <section class="card panel">
+        <h3 class="ph">Active Alerts <span class="tag" id="alertCount">none</span></h3>
+        <div class="alertbar">
+          <label class="switch">
+            <input type="checkbox" id="soundToggle" checked>
+            <span>Alert sound</span>
+          </label>
+          <button class="btn btn-ghost btn-sm" id="muteBtn" type="button">Mute</button>
+          <button class="btn btn-ghost btn-sm" id="testAlertBtn" type="button">Test alert</button>
+        </div>
+        <ul class="alertlist" id="alertList">
+          <li class="muted">No alerts active. Conditions are within limits.</li>
+        </ul>
+        <p class="srcnote">
+          Alerts say what a human should check. They never decide risk, and they
+          never claim to detect rain, pests, fungus or groundwater &mdash; only that
+          readings are <em>consistent with</em> something.
+        </p>
+      </section>
+
+      <section class="card panel">
         <h3 class="ph">Recent Events</h3>
         <ul class="timeline" id="eventsList"></ul>
         <div class="ackrow">
           <input id="ackNote" type="text" placeholder="What did you physically check?">
           <button class="btn btn-ghost btn-sm" id="ackVerified">Ack &mdash; verified</button>
           <button class="btn btn-warn btn-sm" id="ackUnverified">Ack &mdash; not verified</button>
+        </div>
+      </section>
+
+      <section class="card panel">
+        <h3 class="ph">Recent Trend <span class="tag">last 60 readings</span></h3>
+        <div class="trendwrap">
+          <svg class="trend" id="trendChart" viewBox="0 0 560 200"
+               preserveAspectRatio="none" role="img"
+               aria-label="Temperature and humidity trend from stored telemetry history"></svg>
+          <div class="tlegend">
+            <span><i class="dot alert"></i>Humidity %</span>
+            <span><i class="dot watch"></i>Temperature &deg;C</span>
+            <span class="muted" id="trendMeta">&mdash;</span>
+          </div>
         </div>
       </section>
 

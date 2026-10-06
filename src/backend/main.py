@@ -22,9 +22,11 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import alerts                      # noqa: E402
 import engine                      # noqa: E402
 import slm_forensics               # noqa: E402
 from database import Database, _now_iso   # noqa: E402
+from csv_worker import CsvWorker           # noqa: E402
 from serial_worker import SerialWorker      # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,7 +38,7 @@ db = Database()
 lock = threading.Lock()
 
 STATE = {
-    "mode": "LIVE",            # LIVE | SIMULATION | OFFLINE
+    "mode": "OFFLINE",         # LIVE | SIMULATION | OFFLINE
     "source_detail": "starting",
     "last_packet": None,
     "last_result": None,
@@ -48,6 +50,10 @@ STATE = {
     "unverified_ack": None,
     "facility": {},
     "sim_hold_until": 0.0,
+    "alerts": {"alerts": [], "new": [], "cleared": [], "top": None},
+    "alerts_enabled": True,
+    "sound_enabled": True,
+    "pipeline_error": None,
 }
 
 
@@ -73,23 +79,52 @@ STATE["facility"] = {
 
 SIM_HOLD_SECONDS = 60.0   # keep a triggered scenario on screen long enough to read
 
+# One alert engine for the whole server lifetime. It holds the RH rate history
+# that rain-surge detection depends on, so it must NOT be rebuilt per request.
+ALERTS = alerts.AlertEngine(PROFILE.get("alerts"))
+
+
+def run_alerts(result: dict, extra: dict = None, now: float = None):
+    """Evaluate the alert layer and record newly-raised alerts in the ledger.
+
+    Returns the alert payload for the response. Never raises: a failure here
+    must not take down the telemetry pipeline.
+    """
+    try:
+        payload = ALERTS.detect(result or {}, time.time() if now is None else now)
+        for a in payload["new"]:
+            try:
+                db.log_event("ALERT", result or {}, {"alert": a})
+            except Exception:                      # noqa: BLE001
+                pass
+        if payload["new"] or payload["cleared"]:
+            STATE["alerts"] = {k: payload[k] for k in ("alerts", "new", "cleared")}
+        STATE["alerts"]["top"] = payload["top"]
+        if extra:
+            STATE["alerts"].update(extra)
+        return STATE["alerts"]
+    except Exception as exc:                       # noqa: BLE001
+        return STATE.get("alerts") or {"alerts": [], "new": [], "cleared": [],
+                                       "top": None, "error": str(exc)[:120]}
+
 
 def process_telemetry(packet: dict, source: str, hold: bool = False) -> dict:
     """THE single entry point into physics + engine + ledger."""
+    sample_time = engine.timestamp_epoch(packet.get("timestamp"))
     with lock:
         if hold:
             STATE["sim_hold_until"] = time.time() + SIM_HOLD_SECONDS
-        elif source in ("MOCK", "LIVE") and time.time() < STATE.get("sim_hold_until", 0):
+        elif source == "MOCK" and time.time() < STATE.get("sim_hold_until", 0):
             # A scenario is on screen. Mock/live noise must not erase it.
             return dict(STATE["last_result"] or {})
         STATE["last_packet"] = packet
         STATE["last_ts"] = time.time()
         STATE["offline_mode"] = False
         STATE["source_detail"] = source
-        if source != "SIMULATION":
-            STATE["mode"] = "LIVE"
+        STATE["mode"] = "LIVE" if source in ("LIVE", "FILE") else "SIMULATION"
 
-        result = engine.evaluate(packet, STATE["baseline_cm"], STATE["limits"])
+        result = engine.evaluate(packet, STATE["baseline_cm"], STATE["limits"],
+                                 sample_time=sample_time)
         previous = STATE["last_result"]
         STATE["last_result"] = result
         db.log_telemetry(packet, result, source)
@@ -103,11 +138,12 @@ def process_telemetry(packet: dict, source: str, hold: bool = False) -> dict:
             })
             STATE["last_event_id"] = event_id
     result = dict(result)
-    result["mode"] = STATE["mode"] if source != "SIMULATION" else "SIMULATION"
+    result["mode"] = "SIMULATION" if source in ("MOCK", "SIMULATION") else "LIVE"
     result["source"] = source
     result["timestamp"] = packet.get("timestamp") or _now_iso()
     result["event_id"] = STATE["last_event_id"]
     result["explanation"] = slm_forensics.explain(result)
+    result["alerts"] = run_alerts(result, now=sample_time)
     return result
 
 
@@ -126,7 +162,9 @@ def apply_offline(seconds: float = 0):
     result["source"] = "SIMULATION"
     result["timestamp"] = _now_iso()
     result["event_id"] = STATE["last_event_id"]
+    result["seconds_since_last"] = round(seconds, 1)
     result["explanation"] = slm_forensics.explain(result)
+    result["alerts"] = run_alerts(result)
     return result
 
 
@@ -147,9 +185,37 @@ def apply_unverified_ack(ack: dict):
     result["timestamp"] = _now_iso()
     result["event_id"] = STATE["last_event_id"]
     result["explanation"] = slm_forensics.explain(result)
+    result["alerts"] = run_alerts(result)
     return result
+
+
+def restore_latest_telemetry():
+    """Restore the last saved reading on restart without writing a duplicate."""
+    row = db.latest_telemetry()
+    if not row:
+        return
+    packet = json.loads(row["raw_json"])
+    sample_time = engine.timestamp_epoch(packet.get("timestamp"))
+    result = json.loads(row["result_json"]) if row["result_json"] else \
+        engine.evaluate(packet, STATE["baseline_cm"], STATE["limits"],
+                        sample_time=sample_time)
+    facts = result.get("facts") or {}
+    engine.STRESS.restore(facts.get("moisture_stress_hours"),
+                          facts.get("thermal_stress_hours"), sample_time)
+    try:
+        last_ts = datetime.fromisoformat(row["ts"]).timestamp()
+    except ValueError:
+        last_ts = time.time()
+    STATE["last_packet"] = packet
+    STATE["last_result"] = result
+    STATE["last_ts"] = last_ts
+    STATE["mode"] = "SIMULATION" if row["source"] in ("MOCK", "SIMULATION") else "LIVE"
+    STATE["source_detail"] = row["source"]
+    run_alerts(result, now=sample_time)
+
+
 class TelemetryIn(BaseModel):
-    timestamp: str | None = None
+    timestamp: datetime | None = None
     temp: float | None = None
     rh: float | None = None
     fork_raw: float | None = None
@@ -190,9 +256,13 @@ def get_status():
         "facility": STATE["facility"],
         "mode": STATE["mode"],
         "source_detail": _worker_detail(),
+        "pipeline_error": STATE["pipeline_error"],
         "limits": STATE["limits"],
         "baseline_cm": STATE["baseline_cm"],
         "result": result,
+        # Alert layer. Re-evaluated on every poll so a condition that appears
+        # while the telemetry source is quiet still reaches the operator.
+        "alerts": run_alerts(result),
         "scenarios": [{"id": k, "label": v.get("label", k), "expect": v.get("expect", "")}
                       for k, v in SCENARIOS.items()],
         "chain": db.verify_chain(),
@@ -204,7 +274,7 @@ def get_status():
 
 @app.post("/api/telemetry")
 def post_telemetry(body: TelemetryIn):
-    packet = body.model_dump(exclude_none=True)
+    packet = body.model_dump(mode="json", exclude_none=True)
     if not packet:
         raise HTTPException(400, "empty telemetry payload")
     return process_telemetry(packet, "LIVE")
@@ -283,18 +353,32 @@ def index():
 @app.on_event("startup")
 def startup():
     engine.STRESS.reset()
-    seed = _load_json("sensor_reading.json", {})
+    csv_path = os.environ.get("GRAINGUARD_CSV_PATH", "").strip()
+    restore_latest_telemetry()
+    seed = {} if csv_path else _load_json("sensor_reading.json", {})
     if seed:
         process_telemetry(seed, "LIVE")
 
     def on_packet(packet, mode):
         try:
             process_telemetry(packet, mode)
-        except Exception:                      # noqa: BLE001 - never crash the app
-            pass
+            STATE["pipeline_error"] = None
+        except Exception as exc:               # noqa: BLE001 - keep the worker alive, but report failure
+            STATE["pipeline_error"] = str(exc)[:200]
 
-    mock = {"temp": 27.2, "rh": 61.0, "fork_raw": 890, "ldr_raw": 22, "distance_cm": 15.0}
-    worker = SerialWorker(on_packet, mock_packet=mock)
+    if csv_path:
+        def on_csv_packet(packet, mode):
+            try:
+                process_telemetry(packet, mode)
+                STATE["pipeline_error"] = None
+            except Exception as exc:       # report and leave the file cursor unchanged
+                STATE["pipeline_error"] = str(exc)[:200]
+                raise
+
+        worker = CsvWorker(csv_path, db, on_csv_packet)
+    else:
+        mock = {"temp": 27.2, "rh": 61.0, "fork_raw": 890, "ldr_raw": 22, "distance_cm": 15.0}
+        worker = SerialWorker(on_packet, mock_packet=mock)
     worker.start()
     STATE["source_detail"] = worker.detail
     STATE["_worker"] = worker

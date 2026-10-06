@@ -9,6 +9,7 @@ may override what it returns.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 from physics import (
     calculate_dew_point,
@@ -48,9 +49,9 @@ class StressTracker:
         self.thermal_hours = 0.0
         self._last_ts = None
 
-    def update(self, temp_c, rh_pct, emc, limits=None):
+    def update(self, temp_c, rh_pct, emc, limits=None, sample_time=None):
         limits = limits or {}
-        now = time.time()
+        now = time.time() if sample_time is None else sample_time
         dt = 0.0 if self._last_ts is None else max(0.0, now - self._last_ts)
         dt = min(dt, 60.0)  # cap so a restart or long gap cannot inflate hours
         self.moisture_hours, self.thermal_hours = update_stress(
@@ -67,8 +68,23 @@ class StressTracker:
         self.thermal_hours = 0.0
         self._last_ts = None
 
+    def restore(self, moisture_hours, thermal_hours, sample_time=None):
+        self.moisture_hours = max(0.0, float(moisture_hours or 0.0))
+        self.thermal_hours = max(0.0, float(thermal_hours or 0.0))
+        self._last_ts = sample_time
+
 
 STRESS = StressTracker()
+
+
+def timestamp_epoch(timestamp):
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return None
+    try:
+        value = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return value.timestamp()
 
 
 def _num(v, lo, hi):
@@ -78,7 +94,8 @@ def _fmt(v, unit="", nd=1):
     return "unavailable" if v is None else f"{v:.{nd}f}{unit}"
 
 
-def evaluate(telemetry: dict, baseline_cm=None, limits: dict = None) -> dict:
+def evaluate(telemetry: dict, baseline_cm=None, limits: dict = None,
+             sample_time=None) -> dict:
     """Run the full pipeline for one telemetry packet."""
     t = telemetry or {}
     limits = limits or {}
@@ -105,7 +122,9 @@ def evaluate(telemetry: dict, baseline_cm=None, limits: dict = None) -> dict:
     dew = calculate_dew_point(temp, rh) if (temp is not None and rh is not None) else None
     delta_h = (calculate_delta_height(dist, baseline_cm)
                if (dist is not None and baseline_cm is not None) else None)
-    m_h, t_h = STRESS.update(temp, rh, emc, limits)
+    if sample_time is None:
+        sample_time = timestamp_epoch(t.get("timestamp"))
+    m_h, t_h = STRESS.update(temp, rh, emc, limits, sample_time)
 
     state, risk, aeration_ok = S0, "LOW", False
     rule, evidence, checks = "", [], []

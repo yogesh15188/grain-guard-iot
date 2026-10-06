@@ -63,5 +63,20 @@ r = engine.evaluate({"temp": "hot", "rh": None, "fork_raw": 99999}, BASE, LIM)
 fails += 0 if r["invalid_channels"] else 1
 print(f"{'PASS' if r['invalid_channels'] else 'FAIL'}  invalid_input       -> invalid={r['invalid_channels']}")
 
+# File records use their recorded times for cumulative stress, not import speed.
+engine.STRESS.reset()
+first = engine.evaluate(
+    {"timestamp": "2026-10-06T10:00:00+00:00", "temp": 25.0, "rh": 70.0},
+    BASE, LIM)
+second = engine.evaluate(
+    {"timestamp": "2026-10-06T10:01:00+00:00", "temp": 25.0, "rh": 70.0},
+    BASE, LIM)
+ok = first["facts"]["moisture_stress_hours"] == 0.0 \
+    and second["facts"]["moisture_stress_hours"] == 0.02
+fails += 0 if ok else 1
+print(f"{'PASS' if ok else 'FAIL'}  timestamped_stress   -> "
+      f"{second['facts']['moisture_stress_hours']:.2f} h after 60 recorded seconds")
+engine.STRESS.reset()
+
 print("\n" + ("ALL CHECKS PASSED" if fails == 0 else f"{fails} CHECK(S) FAILED"))
 sys.exit(1 if fails else 0)
