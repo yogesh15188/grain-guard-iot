@@ -42,6 +42,7 @@ STATE = {
     "source_detail": "starting",
     "last_packet": None,
     "last_result": None,
+    "last_source": None,
     "last_ts": None,
     "last_event_id": None,
     "baseline_cm": 15.0,
@@ -118,6 +119,7 @@ def process_telemetry(packet: dict, source: str, hold: bool = False) -> dict:
             # A scenario is on screen. Mock/live noise must not erase it.
             return dict(STATE["last_result"] or {})
         STATE["last_packet"] = packet
+        STATE["last_source"] = source
         STATE["last_ts"] = time.time()
         STATE["offline_mode"] = False
         STATE["source_detail"] = source
@@ -208,6 +210,7 @@ def restore_latest_telemetry():
         last_ts = time.time()
     STATE["last_packet"] = packet
     STATE["last_result"] = result
+    STATE["last_source"] = row["source"]
     STATE["last_ts"] = last_ts
     STATE["mode"] = "SIMULATION" if row["source"] in ("MOCK", "SIMULATION") else "LIVE"
     STATE["source_detail"] = row["source"]
@@ -244,6 +247,10 @@ def get_status():
         result = dict(STATE["last_result"] or {})
         result["mode"] = STATE["mode"]
         result["source_detail"] = _worker_detail()
+        result["source"] = STATE["last_source"]
+        if STATE["last_packet"]:
+            result["timestamp"] = (STATE["last_packet"].get("timestamp")
+                                   or _now_iso())
         result["facility"] = STATE["facility"]
         result["baseline_cm"] = STATE["baseline_cm"]
         result["limits"] = STATE["limits"]

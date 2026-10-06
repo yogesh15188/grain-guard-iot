@@ -25,10 +25,26 @@ def parse_line(line: str):
     """Parse and validate one telemetry line. Returns dict or None."""
     if not line:
         return None
-    try:
-        obj = json.loads(line)
-    except ValueError:
-        return None
+    line = line.strip()
+    if line.upper().startswith("DATA,"):
+        values = line.split(",")
+        if len(values) != len(FIELDS) + 1:
+            return None
+        out = {}
+        for key, value in zip(FIELDS, values[1:]):
+            try:
+                number = float(value)
+            except ValueError:
+                return None
+            if not math.isfinite(number):
+                return None
+            out[key] = number
+        return out
+    else:
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            return None
     if not isinstance(obj, dict):
         return None
     out = {}

@@ -39,6 +39,15 @@ class SerialWorkerChecks(unittest.TestCase):
         self.assertIsNone(parse_line('{"temp": NaN}'))
         self.assertIsNone(parse_line('{"temp": 1e999}'))
 
+    def test_parse_arduino_sketch_data_line(self):
+        packet = parse_line("DATA,27.0,60.0,900,20,15.0\r\n")
+        self.assertEqual(packet, {
+            "temp": 27.0, "rh": 60.0, "fork_raw": 900.0,
+            "ldr_raw": 20.0, "distance_cm": 15.0,
+        })
+        self.assertIsNone(parse_line("DATA,27.0,60.0,900,20"))
+        self.assertIsNone(parse_line("DATA,27.0,60.0,NaN,20,15.0"))
+
     def test_hardware_packets_use_live_source_and_close_serial(self):
         serial = FakeSerial([
             b'{"temp":28.5,"rh":78,"fork_raw":1023,"ldr_raw":12,'

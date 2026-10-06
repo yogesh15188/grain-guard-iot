@@ -123,9 +123,18 @@ Missing or invalid fields are reported, never guessed, and never crash the app.
 
 ### Connect an IoT controller
 
-The backend reads newline-terminated JSON from an Arduino-compatible USB serial
-connection at **9600 baud** by default. Send one JSON object per line using the
-same field names and units as the API, for example:
+The included [sketch.ino](./firmware/sketch.ino) runs on an Arduino UNO R4
+Minima and emits one newline-terminated `DATA` record every two seconds over
+USB serial at **9600 baud**. GrainGuard accepts that firmware format directly:
+
+```text
+DATA,27.0,60.0,900,20,15.0
+```
+
+The fields after `DATA` are temperature, relative humidity, fork/proximity
+reading, light reading and distance, in that order. The backend also accepts
+newline-terminated JSON from other controllers, using the same field names and
+units as the API:
 
 ```json
 {"timestamp":"2026-10-06T11:00:00+05:30","temp":28.5,"rh":78.0,"fork_raw":1023,"ldr_raw":12,"distance_cm":15.0}
@@ -133,8 +142,8 @@ same field names and units as the API, for example:
 
 Map your sensor readings to `temp` in °C, `rh` in percent, `fork_raw` and
 `ldr_raw` as 0–1023 ADC readings, and `distance_cm` in centimetres. The
-controller firmware must perform any required sensor calibration and emit this
-line format; the backend does not guess or calibrate hardware values.
+controller firmware must perform any required sensor calibration; the backend
+does not guess or calibrate hardware values.
 
 Set `GRAINGUARD_SERIAL_PORT` to the controller's port (for example `COM5`) when
 more than one serial device is attached. Otherwise, GrainGuard discovers a
@@ -195,7 +204,7 @@ the grain. Findings are phrased as *consistent with*, *possible*,
 
 ```
 grain-guard/
-├── firmware/            # Arduino sketch — NOT touched by this build
+├── firmware/            # Arduino UNO R4 Minima sketch
 ├── src/backend/
 │   ├── main.py          # FastAPI: 6 endpoints, one shared pipeline
 │   ├── physics.py       # EMC, dew point, Δheight, stress hours
