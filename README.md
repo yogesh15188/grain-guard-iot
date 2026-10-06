@@ -25,7 +25,7 @@ running on mock telemetry.
 python run.py --no-open     # server only
 python tests_check.py       # verify engine against all scenarios
 python tests_serial_worker.py  # verify serial ingestion and reconnection
-python tests_csv_worker.py  # verify CSV import and append monitoring
+python tests_database.py   # verify persistence and ledger integrity
 ```
 
 ---
@@ -210,7 +210,6 @@ grain-guard/
 │   ├── physics.py       # EMC, dew point, Δheight, stress hours
 │   ├── engine.py        # ordered rule engine -> state/risk/facts/interlock
 │   ├── database.py      # SQLite WAL + hash-chained ledger
-│   ├── csv_worker.py    # append-only CSV import and monitoring
 │   ├── slm_forensics.py # optional narrative, 2s timeout, hard fallback
 │   ├── mock_data.py     # realistic mock telemetry for simulation mode
 │   └── serial_worker.py # serial reader -> automatic mock fallback
@@ -233,30 +232,12 @@ license is included under `src/frontend/vendor/LICENSES/`.
 | `GRAINGUARD_SERIAL_BAUD` | `9600` | serial baud rate |
 | `GRAINGUARD_SERIAL_RETRY_SECONDS` | `5` | wait between connection attempts |
 | `GRAINGUARD_SERIAL_STALE_SECONDS` | `15` | switch to fallback after no valid packet |
-| `GRAINGUARD_CSV_PATH` | unset | append-only sensor CSV to import and monitor |
 | `GRAINGUARD_SLM` | `1` | set `0` to disable the SLM entirely |
 | `GRAINGUARD_SLM_URL` | Ollama | local SLM endpoint |
 
-### Connect a CSV data file
-
-Set `GRAINGUARD_CSV_PATH` to the full path of the sensor CSV before starting
-GrainGuard. When this is set, CSV ingestion is used instead of serial/mock
-telemetry. The file must have a header row containing
-`timestamp,temp,rh,fork_raw,ldr_raw,distance_cm`, with one complete record per
-line and a newline after each record. Existing rows are processed on first
-connection; new appended rows are picked up automatically. The file location
-and byte cursor are stored locally so a restart resumes at the next row rather
-than duplicating the imported history. Replacing or truncating the file starts
-a fresh import.
-
-For example, in PowerShell:
-
-```powershell
-$env:GRAINGUARD_CSV_PATH = "C:\path\to\sensor-readings.csv"
-python run.py
-```
-
-Use ISO-8601 timestamps and the same units as the API. A malformed row is
-reported in the hardware/status banner and skipped without blocking subsequent
-complete rows. Each accepted record is sent through the deterministic risk
-engine and saved to SQLite, where dashboard alerts and history are refreshed.
+Arduino serial readings are processed directly by the deterministic risk
+engine and saved to the local SQLite ledger. Use the **Download audit PDF**
+control in the console to export the latest readings, decisions, alert causes,
+event history, operator acknowledgments, and ledger-integrity status. The
+export includes the newest 500 telemetry records and newest 500 events (plus
+all acknowledgments); the report states the full record counts.

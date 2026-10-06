@@ -49,11 +49,6 @@ CREATE TABLE IF NOT EXISTS acknowledgments (
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 CREATE INDEX IF NOT EXISTS idx_tel_ts ON telemetry(ts);
-CREATE TABLE IF NOT EXISTS csv_cursors (
-    source_path TEXT PRIMARY KEY,
-    file_signature TEXT NOT NULL,
-    byte_offset INTEGER NOT NULL
-);
 """
 
 
@@ -75,6 +70,7 @@ class Database:
         }
         if "result_json" not in telemetry_columns:
             self.conn.execute("ALTER TABLE telemetry ADD COLUMN result_json TEXT")
+        self.conn.execute("DROP TABLE IF EXISTS csv_cursors")
         self.conn.commit()
 
     # -- hash chain ------------------------------------------------------
@@ -126,23 +122,6 @@ class Database:
             return {"id": cur.lastrowid, "ts": ts, "operator": operator,
                     "event_id": event_id, "verified": bool(verified), "note": note}
 
-    def csv_cursor(self, source_path: str):
-        with self.lock:
-            row = self.conn.execute(
-                "SELECT file_signature,byte_offset FROM csv_cursors WHERE source_path=?",
-                (source_path,)).fetchone()
-            return dict(row) if row else None
-
-    def save_csv_cursor(self, source_path: str, file_signature: str,
-                        byte_offset: int) -> None:
-        with self.lock:
-            self.conn.execute(
-                "INSERT INTO csv_cursors (source_path,file_signature,byte_offset) "
-                "VALUES (?,?,?) ON CONFLICT(source_path) DO UPDATE SET "
-                "file_signature=excluded.file_signature, byte_offset=excluded.byte_offset",
-                (source_path, file_signature, byte_offset))
-            self.conn.commit()
-
     def latest_telemetry(self):
         with self.lock:
             row = self.conn.execute(
@@ -150,6 +129,37 @@ class Database:
                 "ORDER BY id DESC LIMIT 1"
             ).fetchone()
             return dict(row) if row else None
+
+    def audit_snapshot(self, telemetry_limit: int = 500,
+                       event_limit: int = 500) -> dict:
+        """Return a consistent, bounded snapshot for an audit report."""
+        with self.lock:
+            telemetry_total = self.conn.execute(
+                "SELECT COUNT(*) FROM telemetry").fetchone()[0]
+            event_total = self.conn.execute(
+                "SELECT COUNT(*) FROM events").fetchone()[0]
+            acknowledgment_total = self.conn.execute(
+                "SELECT COUNT(*) FROM acknowledgments").fetchone()[0]
+            telemetry = [dict(row) for row in self.conn.execute(
+                "SELECT id,ts,source,temp,rh,fork_raw,ldr_raw,distance_cm,"
+                "state,risk,rule,result_json,hash FROM telemetry "
+                "ORDER BY id DESC LIMIT ?", (telemetry_limit,)).fetchall()]
+            events = [dict(row) for row in self.conn.execute(
+                "SELECT id,ts,kind,state,risk,rule,detail_json,hash FROM events "
+                "ORDER BY id DESC LIMIT ?", (event_limit,)).fetchall()]
+            acknowledgments = [dict(row) for row in self.conn.execute(
+                "SELECT id,ts,operator,event_id,verified,note,hash FROM acknowledgments "
+                "ORDER BY id DESC").fetchall()]
+            chain = self.verify_chain()
+            return {
+                "telemetry_total": telemetry_total,
+                "event_total": event_total,
+                "acknowledgment_total": acknowledgment_total,
+                "telemetry": list(reversed(telemetry)),
+                "events": list(reversed(events)),
+                "acknowledgments": list(reversed(acknowledgments)),
+                "chain": chain,
+            }
 
     # -- reads -----------------------------------------------------------
     def history(self, limit: int = 60) -> list:

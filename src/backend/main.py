@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,8 +25,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import alerts                      # noqa: E402
 import engine                      # noqa: E402
 import slm_forensics               # noqa: E402
+from audit_pdf import build_audit_pdf   # noqa: E402
 from database import Database, _now_iso   # noqa: E402
-from csv_worker import CsvWorker           # noqa: E402
 from serial_worker import SerialWorker      # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -267,9 +267,7 @@ def get_status():
         "limits": STATE["limits"],
         "baseline_cm": STATE["baseline_cm"],
         "result": result,
-        # Alert layer. Re-evaluated on every poll so a condition that appears
-        # while the telemetry source is quiet still reaches the operator.
-        "alerts": run_alerts(result),
+        "alerts": dict(STATE["alerts"]),
         "scenarios": [{"id": k, "label": v.get("label", k), "expect": v.get("expect", "")}
                       for k, v in SCENARIOS.items()],
         "chain": db.verify_chain(),
@@ -297,6 +295,17 @@ def get_events(limit: int = 60):
     return {"events": db.events(min(limit, 200)),
             "acknowledgments": db.acknowledgments(20),
             "chain": db.verify_chain()}
+
+
+@app.get("/api/audit.pdf")
+def download_audit_pdf():
+    snapshot = db.audit_snapshot()
+    pdf = build_audit_pdf(snapshot, STATE["facility"])
+    return StreamingResponse(
+        pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="grain-guard-audit.pdf"'},
+    )
 
 
 @app.post("/api/simulate/{scenario_id}")
@@ -360,9 +369,8 @@ def index():
 @app.on_event("startup")
 def startup():
     engine.STRESS.reset()
-    csv_path = os.environ.get("GRAINGUARD_CSV_PATH", "").strip()
     restore_latest_telemetry()
-    seed = {} if csv_path else _load_json("sensor_reading.json", {})
+    seed = _load_json("sensor_reading.json", {})
     if seed:
         process_telemetry(seed, "LIVE")
 
@@ -373,19 +381,8 @@ def startup():
         except Exception as exc:               # noqa: BLE001 - keep the worker alive, but report failure
             STATE["pipeline_error"] = str(exc)[:200]
 
-    if csv_path:
-        def on_csv_packet(packet, mode):
-            try:
-                process_telemetry(packet, mode)
-                STATE["pipeline_error"] = None
-            except Exception as exc:       # report and leave the file cursor unchanged
-                STATE["pipeline_error"] = str(exc)[:200]
-                raise
-
-        worker = CsvWorker(csv_path, db, on_csv_packet)
-    else:
-        mock = {"temp": 27.2, "rh": 61.0, "fork_raw": 890, "ldr_raw": 22, "distance_cm": 15.0}
-        worker = SerialWorker(on_packet, mock_packet=mock)
+    mock = {"temp": 27.2, "rh": 61.0, "fork_raw": 890, "ldr_raw": 22, "distance_cm": 15.0}
+    worker = SerialWorker(on_packet, mock_packet=mock)
     worker.start()
     STATE["source_detail"] = worker.detail
     STATE["_worker"] = worker

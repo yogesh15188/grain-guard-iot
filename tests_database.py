@@ -38,20 +38,25 @@ class DatabaseChecks(unittest.TestCase):
         self.assertFalse(report["telemetry"])
         self.assertIn("row 1", report["detail"])
 
-    def test_result_and_file_cursor_are_persisted(self):
+    def test_result_and_audit_snapshot_are_persisted(self):
         result = {"state": "S0_IDLE_SAFE", "risk": "LOW",
                   "facts": {"moisture_stress_hours": 1.25,
                             "thermal_stress_hours": 0.5}}
         self.db.log_telemetry(
             {"timestamp": "2026-10-06T10:00:00+05:30", "rh": 60.0},
-            result, "FILE")
-        self.db.save_csv_cursor("C:/sensor.csv", "signature", 123)
+            result, "LIVE")
+        event_id = self.db.log_event("STATE_CHANGE", result, {"source": "LIVE"})
+        self.db.log_ack("operator", event_id, 1, "checked")
 
-        latest = self.db.latest_telemetry()
-        self.assertEqual(latest["result_json"],
+        snapshot = self.db.audit_snapshot()
+        self.assertEqual(snapshot["telemetry_total"], 1)
+        self.assertEqual(snapshot["event_total"], 1)
+        self.assertEqual(snapshot["acknowledgment_total"], 1)
+        self.assertEqual(snapshot["telemetry"][0]["result_json"],
                          json.dumps(result, sort_keys=True, default=str))
-        self.assertEqual(self.db.csv_cursor("C:/sensor.csv"),
-                         {"file_signature": "signature", "byte_offset": 123})
+        self.assertEqual(snapshot["telemetry"][0]["source"], "LIVE")
+        self.assertTrue(all(snapshot["chain"][table] for table in (
+            "telemetry", "events", "acknowledgments")))
 
 
 if __name__ == "__main__":

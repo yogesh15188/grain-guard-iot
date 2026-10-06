@@ -205,12 +205,6 @@ function renderStatus(payload) {
   } else if (/connected/i.test(detail)) {
     hw.textContent = 'HARDWARE LIVE';
     hw.className = 'hwflag ok';
-  } else if (/CSV LIVE/i.test(detail)) {
-    hw.textContent = 'CSV FILE LIVE';
-    hw.className = 'hwflag ok';
-  } else if (/CSV (INPUT|PIPELINE) ERROR/i.test(detail)) {
-    hw.textContent = 'CSV INPUT ERROR';
-    hw.className = 'hwflag';
   } else if (/connecting/i.test(detail)) {
     hw.textContent = 'CONNECTING TO HARDWARE';
     hw.className = 'hwflag';
